@@ -1,7 +1,7 @@
 alias dls="docker container ls"
 alias dlsa="docker container ls -a"
-alias dils="docker image ls"
-alias dilsa="docker image ls -a"
+alias dimls="docker image ls"
+alias dimlsa="docker image ls -a"
 
 # list mounted volumes in a container 
 function dlsv () {

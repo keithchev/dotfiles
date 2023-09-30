@@ -6,10 +6,10 @@ alias lltree3="exa --tree --level=3 -al"
 alias lltree4="exa --tree --level=4 -al"
 alias lg="exa -al --git"
 
-# alias p="cd ~/projects"
-alias pc="cd ~/projects-cloned"
+alias h="cd ~"
 alias db="cd ~/Dropbox"
 alias D="cd ~/Downloads"
+alias pc="cd ~/projects-cloned"
 
 # list processes listening on localhost
 alias ls-localhost="lsof -iTCP -sTCP:LISTEN -n -P"

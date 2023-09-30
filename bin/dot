@@ -2,8 +2,8 @@
 #
 # dot
 #
-# `dot` handles installation, updates, things like that. Run it periodically
-# to make sure you're on the latest and greatest.
+# `dot` handles installation, updates, things like that. 
+# Run it periodically to make sure you're on the latest and greatest.
 
 set -e
 
@@ -37,9 +37,6 @@ while test $# -gt 0; do
 	esac
 	shift
 done
-
-# WARNING: this must be the same as the path in zsh/zshrc.symlink
-export DOTFILES=$HOME/projects/dotfiles
 
 # Set macOS defaults
 $DOTFILES/macos/set-defaults.sh

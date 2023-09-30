@@ -14,3 +14,5 @@ alias pc="cd ~/projects-cloned"
 
 # list processes listening on localhost
 alias ls-localhost="lsof -iTCP -sTCP:LISTEN -n -P"
+
+alias subl-ssh-config="subl ~/.ssh/config"

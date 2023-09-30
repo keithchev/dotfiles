@@ -11,9 +11,3 @@ alias glg='git log --pretty=format:"%h %Cblue %d %Cred %ad %Cgreen %ae %Creset %
 
 # Remove `+` and `-` from start of diff lines; just rely upon color.
 alias gd='git diff --color | sed "s/^\([^-+ ]*\)[-+ ]/\\1/" | less -r'
-
-# change both the author date and commit date of the most recent commit
-function git-commit-amend-date() {
-    new_date=$1
-    GIT_COMMITTER_DATE="$new_date" GIT_AUTHOR_DATE="$new_date" git commit --amend --no-edit --date "$new_date"
-}

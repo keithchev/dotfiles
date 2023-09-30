@@ -38,11 +38,12 @@ while test $# -gt 0; do
 	shift
 done
 
-export ZSH=$HOME/.dotfiles
+# WARNING: this must be the same as the path in zsh/zshrc.symlink
+export DOTFILES=$HOME/projects/dotfiles
 
 # Set macOS defaults
-$ZSH/macos/set-defaults.sh
+$DOTFILES/macos/set-defaults.sh
 
-# Install software
-echo "› $ZSH/script/install"
-$ZSH/script/install
+# call the install.sh script in each directory
+echo "› $DOTFILES/script/install"
+$DOTFILES/script/install

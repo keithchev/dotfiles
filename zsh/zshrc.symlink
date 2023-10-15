@@ -27,23 +27,27 @@ plugins=(
   git
   gh
   zsh-nvm
-  # to install conda-zsh-completion:
+  # to install the conda-zsh-completion plugin below:
   # git clone https://github.com/esc/conda-zsh-completion $ZSH_CUSTOM/plugins/conda-zsh-completion
   conda-zsh-completion
 )
 
-# TODO: is this the right place to source oh-my-zsh?
-source $ZSH/oh-my-zsh.sh
+# the location of the completion dump file
+# (this must appear before sourcing oh-my-zsh.sh to override the default)
+ZSH_COMPDUMP="$HOME/.cache/.zcompdump-${SHORT_HOST}-${ZSH_VERSION}"
 
-# shortcut to this dotfiles path is $DOTFILES
+# the path to this local repo
 export DOTFILES=$HOME/projects/dotfiles
 
 # your project folder that we can `c [tab]` to
 export PROJECTS=$HOME/projects
 
-# Stash your environment variables in ~/.localrc. This means they'll stay out
-# of your main dotfiles repository (which may be public, like this one), but
-# you'll have access to them in your scripts.
+# load the main (and unmodified) oh-my-zsh script
+# TODO: is this the right place to do this?
+source $ZSH/oh-my-zsh.sh
+
+# keep sensitive environment variables in ~/.localrc
+# (this is a way of keeping them off git)
 if [[ -a ~/.localrc ]]
 then
   source ~/.localrc
@@ -66,9 +70,9 @@ do
 done
 
 # initialize autocomplete here, otherwise functions won't be loaded
-# TODO: is this redundant with oh-my-zsh?
+# TODO: is this redundant with the call to compinit in oh-my-zsh.sh?
 autoload -U compinit
-compinit
+compinit -d $HOME/.cache/zcompdump
 
 # load every completion after autocomplete loads
 for file in ${(M)config_files:#*/completion.zsh}

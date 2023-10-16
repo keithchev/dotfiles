@@ -1,5 +1,5 @@
 # assume that `llm` is installed in the base conda env
-local LLM="$HOME/opt/miniconda3/bin/llm"
+local LLM="$CONDA_DIRPATH/bin/llm"
 
 alias llm="$LLM"
 

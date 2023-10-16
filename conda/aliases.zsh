@@ -7,7 +7,7 @@ function conda-rm () {
 }
 
 # create a virtualenv with a specific python version
-function mc () {
+function mamba-create () {
     local name=$1
     local python=$2
     local packages="${@:3}"

@@ -26,8 +26,10 @@ plugins=(
   docker-compose
   git
   gh
+  # to install zsh-nvm:
+  # git clone https://github.com/lukechilds/zsh-nvm $ZSH_CUSTOM/plugins/zsh-nvm
   zsh-nvm
-  # to install the conda-zsh-completion plugin below:
+  # to install conda-zsh-completion:
   # git clone https://github.com/esc/conda-zsh-completion $ZSH_CUSTOM/plugins/conda-zsh-completion
   conda-zsh-completion
 )

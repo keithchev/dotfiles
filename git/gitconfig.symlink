@@ -23,3 +23,6 @@
         autocorrect = 1
 [init]
 	defaultBranch = main
+[user]
+	name = Keith Cheveralls
+	email = keith.chev@gmail.com

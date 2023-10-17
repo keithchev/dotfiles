@@ -1,0 +1,14 @@
+#!/bin/sh
+#
+# Change both the author date and commit date of the most recent commit
+#
+# $1 - the new date
+#
+# Examples
+#
+# git-commit-amend-date 2023-01-30T08:04:13
+
+new_date=$1
+GIT_AUTHOR_DATE="$new_date" 
+GIT_COMMITTER_DATE="$new_date" 
+git commit --amend --no-edit --date "$new_date"

@@ -1,12 +1,12 @@
 
-alias s3ls='aws s3 ls'
+alias s3ls='aws s3 ls --human-readable'
 
-function s3lsb () {
-    aws s3 ls --human-readable s3://$1
+function s3up () {
+    aws s3 cp $1 s3://$2
 }
 
-function s3cp () {
-    aws s3 cp $1 s3://$2
+function s3down () {
+    aws s3 cp s3://$1 $2
 }
 
 function s3rm () {

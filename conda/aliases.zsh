@@ -1,5 +1,5 @@
 alias mls="mamba list"
-alias env-ls="mamba env list"
+alias mels="mamba env list"
 
 # delete a virtualenv
 function mamba-rm () {

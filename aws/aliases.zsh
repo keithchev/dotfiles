@@ -1,5 +1,10 @@
 
-alias s3ls='aws s3 ls --human-readable'
+function s3ls () {
+    local dir=$1
+    # append a trailing slash
+    [[ "${dir}" != */ ]] && dir="${dir}/"
+    aws s3 ls --human-readable "${dir}"
+}
 
 function s3up () {
     aws s3 cp $1 s3://$2

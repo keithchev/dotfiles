@@ -7,7 +7,7 @@ I deleted commands, configs, subdirectories, etc that I don't need or that confl
 I incorporated oh-my-zsh by merging the `.zshrc` created by oh-my-zsh with `zsh/zshrc.symlink`. This may turn out to cause problems when starting with a fresh install of oh-my-zsh. 
 
 ## Usage
-Clone the repo to `~/projects/dotfiles`, call `script/bootstrap`, call `dot`. 
+Clone the repo to `~/projects/dotfiles`, call `script/bootstrap`, call `update-dotfiles`. 
 
 Unlike holman, I decided to clone the repo in my normal directory of local clones (`~/projects`) rather than to the special location `~/.dotfiles`. 
 

@@ -1,5 +1,0 @@
-#!/bin/sh
-#
-# Delete all local branches without a remote-tracking branch
-
-git branch -vv | grep 'origin/.*: gone]' | awk '{print $1}' | xargs git branch -d

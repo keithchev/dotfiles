@@ -10,6 +10,10 @@ function ac-view () {
     gh repo view --web arcadia-science/"$1"
 }
 
+function kc-clone () {
+    gh repo clone keithchev/"$1"
+}
+
 function ac-clone () {
     gh repo clone arcadia-science/"$1"
 }

@@ -7,7 +7,7 @@ LLM_OUTPUT="echo 'call the asc command first'"
 
 # general technical questions; reply in natural language
 function ask () {
-    local system_prompt="imagine you are speaking to a senior software engineer. reply in succinct, detailed, technical terms. avoid verbose explanations and extraneous qualifiers or caveats."
+    local system_prompt="imagine you are speaking to a senior software engineer whose career depends on your answer. reply in succinct, detailed, technical terms. avoid verbose explanations and extraneous qualifiers or caveats."
     "$LLM" -s $system_prompt -m gpt4 "$@"
 }
 

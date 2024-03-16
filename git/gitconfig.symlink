@@ -16,7 +16,7 @@
 [pager]
 	branch = false
 [core]
-	editor = 'subl -n -w' || vim
+	editor = git-editor
 [diff]
         algorithm = histogram
 [difftool]

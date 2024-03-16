@@ -16,13 +16,19 @@
 [pager]
 	branch = false
 [core]
-	editor = subl -n -w
+	editor = 'subl -n -w' || vim
+[diff]
+        algorithm = histogram
 [difftool]
         prompt = false
 [help]
         autocorrect = 1
 [init]
 	defaultBranch = main
-[user]
-	name = Keith Cheveralls
-	email = keith.chev@gmail.com
+[branch]
+	sort = -committerdate
+[merge]
+	conflictstyle = zdiff3
+	tool = meld
+[push]
+	autoSetupRemote = true

@@ -56,3 +56,6 @@
     side-by-side = false
     # use n and N to move between diff sections
     navigate = true
+[user]
+	name = Keith Cheveralls
+	email = keith.chev@gmail.com

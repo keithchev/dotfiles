@@ -87,6 +87,9 @@ done
 
 unset config_files
 
+# add homebrew to path.
+export PATH="/opt/homebrew/bin:$PATH"
+
 # initialize conda and mamba.
 # (this simplifies and replaces the block that conda adds to .zshrc)
 if [ -f "$CONDA_DIRPATH/etc/profile.d/conda.sh" ]; then

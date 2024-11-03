@@ -1,6 +1,6 @@
 alias h="cd ~"
 alias d="cd ~/Dropbox"
-alias D="cd ~/Downloads"
+alias dl="cd ~/Downloads"
 alias pc="cd ~/projects-cloned"
 alias cd-ssh="cd ~/.ssh"
 

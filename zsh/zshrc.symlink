@@ -24,7 +24,10 @@ HIST_STAMPS="yyyy-mm-dd"
 plugins=(
   docker
   docker-compose
+  # the git plugin adds a *ton* of aliases; see here:
+  # https://github.com/ohmyzsh/ohmyzsh/blob/master/plugins/git/git.plugin.zsh
   git
+  # the gh plugin just adds autocompletion; it does not add any aliases.
   gh
   # to install zsh-nvm:
   # git clone https://github.com/lukechilds/zsh-nvm $ZSH_CUSTOM/plugins/zsh-nvm
@@ -34,49 +37,49 @@ plugins=(
   conda-zsh-completion
 )
 
-# the location of the completion dump file
+# the location of the completion dump file.
 # (this must appear before sourcing oh-my-zsh.sh to override the default)
 ZSH_COMPDUMP="$HOME/.cache/.zcompdump-${SHORT_HOST}-${ZSH_VERSION}"
 
-# the path to this local repo
+# the path to this local repo.
 export DOTFILES=$HOME/projects/dotfiles
 
-# your project folder that we can `c [tab]` to
+# your project folder that we can `c [tab]` to.
 export PROJECTS=$HOME/projects
 
-# load the main (and unmodified) oh-my-zsh script
+# load the main (and unmodified) oh-my-zsh script.
 # TODO: is this the right place to do this?
 source $ZSH/oh-my-zsh.sh
 
-# keep sensitive environment variables in ~/.localrc
+# keep sensitive environment variables in ~/.localrc.
 # (this is a way of keeping them off git)
 if [[ -a ~/.localrc ]]
 then
   source ~/.localrc
 fi
 
-# all of our zsh files
+# all of our zsh files.
 typeset -U config_files
 config_files=($DOTFILES/**/*.zsh)
 
-# load the path files
+# load the path files.
 for file in ${(M)config_files:#*/path.zsh}
 do
   source $file
 done
 
-# load everything but the path and completion files
+# load everything but the path and completion files.
 for file in ${${config_files:#*/path.zsh}:#*/completion.zsh}
 do
   source $file
 done
 
-# initialize autocomplete here, otherwise functions won't be loaded
+# initialize autocomplete here, otherwise functions won't be loaded.
 # TODO: is this redundant with the call to compinit in oh-my-zsh.sh?
 autoload -U compinit
 compinit -d $HOME/.cache/zcompdump
 
-# load every completion after autocomplete loads
+# load every completion after autocomplete loads.
 for file in ${(M)config_files:#*/completion.zsh}
 do
   source $file
@@ -84,7 +87,10 @@ done
 
 unset config_files
 
-# initialize conda and mamba
+# add homebrew to path.
+export PATH="/opt/homebrew/bin:$PATH"
+
+# initialize conda and mamba.
 # (this simplifies and replaces the block that conda adds to .zshrc)
 if [ -f "$CONDA_DIRPATH/etc/profile.d/conda.sh" ]; then
     . "$CONDA_DIRPATH/etc/profile.d/conda.sh"
@@ -95,3 +101,11 @@ fi
 if [ -f "$CONDA_DIRPATH/etc/profile.d/mamba.sh" ]; then
     . "$CONDA_DIRPATH/etc/profile.d/mamba.sh"
 fi
+
+export NVM_DIR="$HOME/.nvm"
+# This loads nvm.
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+ # This loads nvm bash_completion.
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+
+export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"

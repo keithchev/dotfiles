@@ -17,3 +17,11 @@ function kc-clone () {
 function ac-clone () {
     gh repo clone arcadia-science/"$1"
 }
+
+function kc-search () {
+    gh search repos --owner keithchev "$1"
+}
+
+function ac-search () {
+    gh search repos --owner arcadia-science "$1"
+}

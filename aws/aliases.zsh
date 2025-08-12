@@ -36,6 +36,14 @@ alias ec2-ls='aws ec2 describe-instances | \
     jq -r ".Reservations[].Instances[] | \
     (.InstanceId + \" \" + .State.Name + \" \" + ( .Tags[]? | select(.Key == \"Name\") | .Value))"'
 
+function ec2-start () {
+    uv run $DOTFILES/aws/manage_instances.py start $1
+}
+
+function ec2-stop () {
+    uv run $DOTFILES/aws/manage_instances.py stop $1
+}
+
 function ec2-status () {
-    aws ec2 describe-instance-status --instance-id $1
+    uv run $DOTFILES/aws/manage_instances.py status $1
 }

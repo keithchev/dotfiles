@@ -4,6 +4,7 @@
 #     "boto3",
 #     "pyyaml",
 #     "click",
+#     "pytz",
 # ]
 # ///
 """
@@ -21,10 +22,24 @@ import shutil
 import time
 import datetime
 from typing import Optional, Tuple
+import pytz
 
 import boto3
 import yaml
 from botocore.exceptions import ClientError
+
+
+def format_timestamp_pst(timestamp) -> str:
+    """Format a timestamp to PST in the style '2024-07-23 4:31PM'"""
+    if timestamp is None:
+        return "N/A"
+    
+    # Convert to PST timezone
+    pst = pytz.timezone('US/Pacific')
+    pst_time = timestamp.astimezone(pst)
+    
+    # Format as requested: 2024-07-23 4:31PM
+    return pst_time.strftime("%Y-%m-%d %-I:%M%p")
 
 
 def load_instances_config() -> dict:
@@ -431,6 +446,20 @@ def status(instance, profile, region):
             instance_type = inst["InstanceType"]
             public_ip = inst.get("PublicIpAddress", "N/A")
             private_ip = inst.get("PrivateIpAddress", "N/A")
+            
+            # Format launch time in PST
+            launch_time = format_timestamp_pst(inst.get("LaunchTime"))
+            
+            # Get state transition time for all states
+            state_transition_time = format_timestamp_pst(inst["State"].get("TransitionTime"))
+
+            # Get the region from the placement or use the passed region parameter
+            instance_region = inst.get("Placement", {}).get("AvailabilityZone", "")
+            if instance_region:
+                # Extract region from AZ (e.g., "us-west-2a" -> "us-west-2")
+                instance_region = instance_region[:-1]
+            else:
+                instance_region = region or "N/A"
 
             # Find alias for this instance
             alias = "N/A"
@@ -447,6 +476,27 @@ def status(instance, profile, region):
             click.echo(f"Instance: {instance_id} ({alias})")
             click.echo(f"  State: {state}")
             click.echo(f"  Type: {instance_type}")
+            click.echo(f"  Region: {instance_region}")
+            click.echo(f"  Launch Time: {launch_time}")
+            
+            # Show state transition time with appropriate label
+            # Use transition time if available, otherwise fall back to launch time for running instances
+            time_to_display = state_transition_time
+            if (not state_transition_time or state_transition_time == "N/A") and state == "running":
+                time_to_display = launch_time
+            
+            if time_to_display and time_to_display != "N/A":
+                if state == "running":
+                    click.echo(f"  Running Since: {time_to_display}")
+                elif state in ["stopped", "stopping"]:
+                    click.echo(f"  Stopped Time: {time_to_display}")
+                elif state in ["terminated", "terminating"]:
+                    click.echo(f"  Terminated Time: {time_to_display}")
+                elif state == "pending":
+                    click.echo(f"  Pending Since: {time_to_display}")
+                else:
+                    click.echo(f"  State Changed: {time_to_display}")
+            
             click.echo(f"  Public IP: {public_ip}")
             click.echo(f"  Private IP: {private_ip}")
 

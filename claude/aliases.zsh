@@ -15,10 +15,23 @@ function _load_claude_credentials() {
   return 0
 }
 
+# Build Claude Code Docker image if it doesn't exist
+function _ensure_claude_docker_image() {
+  if ! docker image inspect claude-code:local >/dev/null 2>&1; then
+    echo "Building Claude Code Docker image..." >&2
+    docker build -t claude-code:local \
+      --build-arg USER_UID=$(id -u) \
+      --build-arg USER_GID=$(id -g) \
+      "$HOME/projects/dotfiles/claude" || return 1
+  fi
+  return 0
+}
+
 # Run Claude Code in a Docker container
 # This allows running Claude Code without installing it locally
 function claude-docker() {
   _load_claude_credentials || return 1
+  _ensure_claude_docker_image || return 1
 
   local workspace="${1:-.}"
   local output="${2:-/tmp/claude-output}"
@@ -27,13 +40,11 @@ function claude-docker() {
   mkdir -p "$output"
 
   docker run -it --rm \
-    --user "$(id -u):$(id -g)" \
     -v "$(cd "$workspace" && pwd)":/workspace:rw \
     -v "$output":/output:rw \
-    -v "$HOME/.claude":/tmp/.claude:rw \
+    -v "$HOME/.claude":/home/claude/.claude:rw \
     -e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
-    -e HOME=/tmp \
-    node:20 bash -c "echo '{\"hasCompletedOnboarding\":true}' > /tmp/.claude.json && cd /workspace && npx -y @anthropic-ai/claude-code --dangerously-skip-permissions"
+    claude-code:local
 }
 
 # Run Claude Code in the current directory

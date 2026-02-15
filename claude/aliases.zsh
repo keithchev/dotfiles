@@ -29,45 +29,86 @@ function _ensure_claude_docker_image() {
 
 # Run Claude Code in a Docker container
 # This allows running Claude Code without installing it locally
+# Usage: claude-docker [workspace] [output] [-- claude-args...]
+#   cdock . /tmp/out -- --resume      → claude --dangerously-skip-permissions --resume
+#   cdock . /tmp/out -- mcp add foo   → claude mcp add foo
 function claude-docker() {
   _load_claude_credentials || return 1
   _ensure_claude_docker_image || return 1
 
-  local workspace="${1:-.}"
-  local output="${2:-/tmp/claude-output}"
+  local workspace="."
+  local output="/tmp/claude-output"
+  local -a claude_args=()
+
+  # Parse arguments: positional args before --, claude args after --
+  local parsing_ours=true
+  local positional=0
+  for arg in "$@"; do
+    if [[ "$arg" == "--" ]]; then
+      parsing_ours=false
+      continue
+    fi
+    if $parsing_ours; then
+      case $positional in
+        0) workspace="$arg" ;;
+        1) output="$arg" ;;
+      esac
+      ((positional++))
+    else
+      claude_args+=("$arg")
+    fi
+  done
 
   # Create output directory if it doesn't exist
   mkdir -p "$output"
 
-  docker run -it --rm \
-    -v "$(cd "$workspace" && pwd)":/workspace:rw \
-    -v "$output":/output:rw \
-    -v "$HOME/.claude":/home/claude/.claude:rw \
-    -e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
+  local -a cmd=(
+    docker run -it --rm
+    -v "$(cd "$workspace" && pwd)":/workspace:rw
+    -v "$output":/output:rw
+    -v "$HOME/.claude":/home/claude/.claude:rw
+    -e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN"
     claude-code:local
+  )
+
+  if (( ${#claude_args[@]} > 0 )); then
+    # Flags (--resume, etc): prepend --dangerously-skip-permissions
+    # Subcommands (mcp add, etc): pass through as-is
+    if [[ "${claude_args[1]}" == -* ]]; then
+      cmd+=(--dangerously-skip-permissions)
+    fi
+    cmd+=("${claude_args[@]}")
+  fi
+  # No extra args → Dockerfile CMD provides --dangerously-skip-permissions
+
+  "${cmd[@]}"
 }
 
 # Run Claude Code in the current directory
+# Usage: claude-docker-here [-- claude-args...]
 function claude-docker-here() {
-  claude-docker "$(pwd)" "${1:-/tmp/claude-output}"
+  claude-docker "$(pwd)" "/tmp/claude-output" "$@"
 }
 
 # Run Claude Code in a specific project directory
-# Usage: claude-docker-project <project-name>
+# Usage: claude-docker-project <project-name> [-- claude-args...]
 function claude-docker-project() {
   if [ -z "$1" ]; then
-    echo "Usage: claude-docker-project <project-name>" >&2
+    echo "Usage: claude-docker-project <project-name> [-- claude-args...]" >&2
     return 1
   fi
 
-  local project_path="$PROJECTS/$1"
+  local project_name="$1"
+  shift
+
+  local project_path="$PROJECTS/$project_name"
 
   if [ ! -d "$project_path" ]; then
     echo "Project directory not found: $project_path" >&2
     return 1
   fi
 
-  claude-docker "$project_path" "/tmp/claude-output-$1"
+  claude-docker "$project_path" "/tmp/claude-output-$project_name" "$@"
 }
 
 alias cdock='claude-docker'

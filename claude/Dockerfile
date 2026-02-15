@@ -40,5 +40,6 @@ WORKDIR /workspace
 # See: https://github.com/anthropics/claude-code/issues/8938
 RUN echo '{"hasCompletedOnboarding":true}' > /home/$USERNAME/.claude.json
 
-# Default command
-CMD ["claude", "--dangerously-skip-permissions"]
+# Default: interactive session with permissions skipped
+ENTRYPOINT ["claude"]
+CMD ["--dangerously-skip-permissions"]

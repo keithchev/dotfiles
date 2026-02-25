@@ -64,6 +64,7 @@ function claude-docker() {
 
   local -a cmd=(
     docker run -it --rm
+    --add-host host.docker.internal:host-gateway
     -v "$(cd "$workspace" && pwd)":/workspace:rw
     -v "$output":/output:rw
     -v "$HOME/.claude":/home/claude/.claude:rw

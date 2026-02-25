@@ -11,7 +11,18 @@ RUN apt-get update && apt-get install -y \
     sudo \
     ripgrep \
     jq \
+    build-essential \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
+
+# Install gh CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js LTS
+RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
 ARG USERNAME=claude
@@ -29,6 +40,9 @@ WORKDIR /home/$USERNAME
 
 # Install Claude Code (installs to ~/.local/bin)
 RUN curl -fsSL https://claude.ai/install.sh | bash
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Add to PATH
 ENV PATH="/home/$USERNAME/.local/bin:$PATH"

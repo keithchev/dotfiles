@@ -111,6 +111,16 @@ function claude-docker-project() {
   claude-docker "$project_path" "/tmp/claude-output-$project_name" "$@"
 }
 
+# Rebuild the Claude Code Docker image
+function claude-docker-rebuild() {
+  echo "Rebuilding Claude Code Docker image..." >&2
+  docker build -t claude-code:local \
+    --build-arg USER_UID=$(id -u) \
+    --build-arg USER_GID=$(id -g) \
+    "$HOME/projects/dotfiles/claude" || return 1
+}
+
 alias cdock='claude-docker'
 alias cdock-here='claude-docker-here'
 alias cdock-project='claude-docker-project'
+alias cdock-rebuild='claude-docker-rebuild'

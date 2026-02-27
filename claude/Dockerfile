@@ -47,7 +47,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 # Add to PATH
 ENV PATH="/home/$USERNAME/.local/bin:$PATH"
 
-# Set working directory for projects
+# Working directory - workspace subdirectory is mounted at runtime
 WORKDIR /workspace
 
 # HACK: Create .claude.json to skip onboarding when using CLAUDE_CODE_OAUTH_TOKEN

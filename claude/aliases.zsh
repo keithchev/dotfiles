@@ -29,15 +29,14 @@ function _ensure_claude_docker_image() {
 
 # Run Claude Code in a Docker container
 # This allows running Claude Code without installing it locally
-# Usage: claude-docker [workspace] [output] [-- claude-args...]
-#   cdock . /tmp/out -- --resume      → claude --dangerously-skip-permissions --resume
-#   cdock . /tmp/out -- mcp add foo   → claude mcp add foo
+# Usage: claude-docker [workspace] [-- claude-args...]
+#   cdock .        -- --resume      → claude --dangerously-skip-permissions --resume
+#   cdock ~/myproj -- mcp add foo   → claude mcp add foo
 function claude-docker() {
   _load_claude_credentials || return 1
   _ensure_claude_docker_image || return 1
 
   local workspace="."
-  local output="/tmp/claude-output"
   local -a claude_args=()
 
   # Parse arguments: positional args before --, claude args after --
@@ -51,7 +50,6 @@ function claude-docker() {
     if $parsing_ours; then
       case $positional in
         0) workspace="$arg" ;;
-        1) output="$arg" ;;
       esac
       ((positional++))
     else
@@ -59,14 +57,15 @@ function claude-docker() {
     fi
   done
 
-  # Create output directory if it doesn't exist
-  mkdir -p "$output"
+  local abs_workspace
+  abs_workspace="$(cd "$workspace" && pwd)"
+  local workspace_name="${abs_workspace:t}"
 
   local -a cmd=(
     docker run -it --rm
     --add-host host.docker.internal:host-gateway
-    -v "$(cd "$workspace" && pwd)":/workspace:rw
-    -v "$output":/output:rw
+    -v "$abs_workspace":/workspace/"$workspace_name":rw
+    -w /workspace/"$workspace_name"
     -v "$HOME/.claude":/home/claude/.claude:rw
     -e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN"
     claude-code:local
@@ -88,7 +87,7 @@ function claude-docker() {
 # Run Claude Code in the current directory
 # Usage: claude-docker-here [-- claude-args...]
 function claude-docker-here() {
-  claude-docker "$(pwd)" "/tmp/claude-output" "$@"
+  claude-docker "$(pwd)" "$@"
 }
 
 # Run Claude Code in a specific project directory
@@ -109,7 +108,7 @@ function claude-docker-project() {
     return 1
   fi
 
-  claude-docker "$project_path" "/tmp/claude-output-$project_name" "$@"
+  claude-docker "$project_path" "$@"
 }
 
 # Rebuild the Claude Code Docker image

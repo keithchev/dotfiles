@@ -68,6 +68,7 @@ function claude-docker() {
     -w /workspace/"$workspace_name"
     -v "$HOME/.claude":/home/claude/.claude:rw
     -e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN"
+    -e UV_PROJECT_ENVIRONMENT=".venv-for-claude"
     claude-code:local
   )
 

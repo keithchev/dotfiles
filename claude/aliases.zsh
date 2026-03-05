@@ -1,14 +1,14 @@
 # Load Claude OAuth token from dotfiles/.env if not already set
 function _load_claude_credentials() {
-  if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+  if [ -z "$ANTHROPIC_API_KEY" ]; then
     local dotfiles_env="$HOME/projects/dotfiles/.env"
     if [ -f "$dotfiles_env" ]; then
-      export CLAUDE_CODE_OAUTH_TOKEN=$(grep -E '^CLAUDE_CODE_OAUTH_TOKEN=' "$dotfiles_env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'")
+      export ANTHROPIC_API_KEY=$(grep -E '^ANTHROPIC_API_KEY=' "$dotfiles_env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'")
     fi
 
-    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
-      echo "Error: CLAUDE_CODE_OAUTH_TOKEN not found in environment or $dotfiles_env" >&2
-      echo "Please create $dotfiles_env with: CLAUDE_CODE_OAUTH_TOKEN=your_token_here" >&2
+    if [ -z "$ANTHROPIC_API_KEY" ]; then
+      echo "Error: ANTHROPIC_API_KEY not found in environment or $dotfiles_env" >&2
+      echo "Please create $dotfiles_env with: ANTHROPIC_API_KEY=your_token_here" >&2
       return 1
     fi
   fi
@@ -67,7 +67,7 @@ function claude-docker() {
     -v "$abs_workspace":/workspace/"$workspace_name":rw
     -w /workspace/"$workspace_name"
     -v "$HOME/.claude":/home/claude/.claude:rw
-    -e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN"
+    -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
     -e UV_PROJECT_ENVIRONMENT=".venv-for-claude"
     claude-code:local
   )

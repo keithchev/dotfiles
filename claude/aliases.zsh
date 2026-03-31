@@ -61,8 +61,11 @@ function claude-docker() {
   abs_workspace="$(cd "$workspace" && pwd)"
   local workspace_name="${abs_workspace:t}"
 
+  local container_name="claude-${workspace_name}-$(date +%s)"
+
   local -a cmd=(
     docker run -it --rm
+    --name "$container_name"
     --add-host host.docker.internal:host-gateway
     -v "$abs_workspace":/workspace/"$workspace_name":rw
     -w /workspace/"$workspace_name"

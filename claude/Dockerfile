@@ -20,9 +20,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o 
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js LTS
+# Install Node.js LTS and enable pnpm via corepack
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
-    && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/* \
+    && corepack enable \
+    && corepack prepare pnpm@latest --activate
 
 # Create non-root user
 ARG USERNAME=claude
@@ -46,6 +48,15 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Add to PATH
 ENV PATH="/home/$USERNAME/.local/bin:$PATH"
+
+# Configure pnpm to use node_modules_claude instead of node_modules
+RUN pnpm config set modules-dir node_modules_claude --global \
+    && pnpm config set virtual-store-dir node_modules_claude/.pnpm --global
+ENV NODE_PATH=node_modules_claude
+
+# Alias npm to pnpm so all installs go through pnpm (and use node_modules_claude)
+RUN printf '#!/bin/sh\nexec pnpm "$@"\n' > /home/$USERNAME/.local/bin/npm \
+    && chmod +x /home/$USERNAME/.local/bin/npm
 
 # Working directory - workspace subdirectory is mounted at runtime
 WORKDIR /workspace

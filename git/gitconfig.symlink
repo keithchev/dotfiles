@@ -10,6 +10,14 @@
         count   = !git shortlog -sn
 	lg = log --color --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
 
+        # commands for reading unfamiliar codebases
+        # (from piechowski.io/post/git-commands-before-reading-code)
+        most-changed-files = !git log --format=format: --name-only --since=\"1 year ago\" | sort | uniq -c | sort -nr | head -20
+        top-contributors = !git shortlog -sn --no-merges
+        top-bug-fix-files = !git log -i -E --grep=\"fix|bug|broken\" --name-only --format='' | sort | uniq -c | sort -nr | head -20
+        commit-counts = "!f() { case \"${1:-month}\" in day) fmt='%Y-%m-%d';; month) fmt='%Y-%m';; year) fmt='%Y';; *) echo 'Usage: git commit-counts [day|month|year]'; return 1;; esac; git log --format=\"%ad\" --date=format:\"$fmt\" | sort | uniq -c; }; f"
+        firefights = !git log --oneline --since=\"1 year ago\" | grep -iE 'revert|hotfix|emergency|rollback'
+
 [color]
         diff = auto
         status = auto

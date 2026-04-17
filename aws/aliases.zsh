@@ -47,3 +47,9 @@ function ec2-stop () {
 function ec2-status () {
     uv run $DOTFILES/aws/manage_instances.py status $1
 }
+
+alias ec2-ls-aliases='uv run $DOTFILES/aws/manage_instances.py list'
+
+function ec2-add-alias () {
+    uv run $DOTFILES/aws/manage_instances.py add-alias $1 $2
+}

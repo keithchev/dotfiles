@@ -120,6 +120,15 @@ def start_instance_and_get_ip(
     else:
         instance_id = get_instance_id_by_alias(instance_id_or_alias)
 
+    # Check current state before starting
+    resp = ec2.describe_instances(InstanceIds=[instance_id])
+    inst = resp["Reservations"][0]["Instances"][0]
+    current_state = inst["State"]["Name"]
+    if current_state == "running":
+        ip = inst.get("PublicIpAddress") or inst.get("PrivateIpAddress", "N/A")
+        print(f"Warning: Instance {instance_id} is already running (IP: {ip})")
+        return current_state, ip
+
     # Try to start; if already running, AWS won't error.
     try:
         print(f"Starting instance {instance_id} ...")
@@ -361,6 +370,38 @@ def stop(instance, profile, region, timeout):
     print(f"Final instance state: {state}")
 
 
+@cli.command("add-alias")
+@click.argument("alias")
+@click.argument("instance_id")
+def add_alias(alias, instance_id):
+    """Add an alias for an instance ID to the config file."""
+    if not instance_id.startswith("i-"):
+        click.echo(f"Error: Instance ID must start with 'i-', got '{instance_id}'")
+        return
+
+    config_path = pathlib.Path.home() / ".aws-instances.yaml"
+
+    config = {}
+    if config_path.exists():
+        with config_path.open("r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+
+    if "instances" not in config:
+        config["instances"] = {}
+
+    if alias in config["instances"]:
+        click.echo(f"Alias '{alias}' already exists (maps to {config['instances'][alias]})")
+        if not click.confirm("Overwrite?"):
+            return
+
+    config["instances"][alias] = instance_id
+
+    with config_path.open("w", encoding="utf-8") as f:
+        yaml.dump(config, f, default_flow_style=False)
+
+    click.echo(f"Added alias: {alias} -> {instance_id}")
+
+
 @cli.command()
 def list():
     """List all instance aliases from the config file."""
@@ -473,10 +514,30 @@ def status(instance, profile, region):
                 except (FileNotFoundError, ValueError):
                     pass
 
+            name = "N/A"
+            for tag in inst.get("Tags", []):
+                if tag["Key"] == "Name":
+                    name = tag["Value"]
+                    break
+
+            uptime_str = "N/A"
+            if state == "running" and inst.get("LaunchTime"):
+                now = datetime.datetime.now(datetime.timezone.utc)
+                delta = now - inst["LaunchTime"]
+                days = delta.days
+                hours = delta.seconds // 3600
+                uptime_str = f"{days}d {hours}h"
+
+            az = inst.get("Placement", {}).get("AvailabilityZone", "N/A")
+            subnet_id = inst.get("SubnetId", "N/A")
+
             click.echo(f"Instance: {instance_id} ({alias})")
+            click.echo(f"  Name: {name}")
             click.echo(f"  State: {state}")
             click.echo(f"  Type: {instance_type}")
             click.echo(f"  Region: {instance_region}")
+            click.echo(f"  AZ: {az}")
+            click.echo(f"  Subnet: {subnet_id}")
             click.echo(f"  Launch Time: {launch_time}")
             
             # Show state transition time with appropriate label
@@ -488,6 +549,7 @@ def status(instance, profile, region):
             if time_to_display and time_to_display != "N/A":
                 if state == "running":
                     click.echo(f"  Running Since: {time_to_display}")
+                    click.echo(f"  Uptime: {uptime_str}")
                 elif state in ["stopped", "stopping"]:
                     click.echo(f"  Stopped Time: {time_to_display}")
                 elif state in ["terminated", "terminating"]:

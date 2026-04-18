@@ -5,16 +5,8 @@ function kc-view () {
     gh repo view --web keithchev/"$1"
 }
 
-function ac-view () {
-    gh repo view --web arcadia-science/"$1"
-}
-
 function kc-clone () {
     gh repo clone keithchev/"$1"
-}
-
-function ac-clone () {
-    gh repo clone arcadia-science/"$1"
 }
 
 function kc-search () {
@@ -23,8 +15,16 @@ function kc-search () {
     gh search repos --owner keithchev "$@" "$query"
 }
 
-function ac-search () {
+function is-view () {
+    gh repo view --web insitro/"$1"
+}
+
+function is-clone () {
+    gh repo clone insitro/"$1"
+}
+
+function is-search () {
     local query=$1
     shift
-    gh search repos --owner arcadia-science "$@" "$query"
+    gh search repos --owner insitro "$@" "$query"
 }

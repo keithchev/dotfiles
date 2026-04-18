@@ -119,3 +119,10 @@ esac
 # pnpm end
 
 export PATH="/Users/keith.cheveralls/.pixi/bin:$PATH"
+
+export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"
+
+# Android SDK.
+export ANDROID_HOME=$HOME/Library/Android/sdk
+export PATH=$PATH:$ANDROID_HOME/platform-tools
+export PATH=$PATH:$ANDROID_HOME/tools

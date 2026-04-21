@@ -15,15 +15,15 @@ function kc-search () {
     gh search repos --owner keithchev "$@" "$query"
 }
 
-function is-view () {
+function ins-view () {
     gh repo view --web insitro/"$1"
 }
 
-function is-clone () {
+function ins-clone () {
     gh repo clone insitro/"$1"
 }
 
-function is-search () {
+function ins-search () {
     local query=$1
     shift
     gh search repos --owner insitro "$@" "$query"

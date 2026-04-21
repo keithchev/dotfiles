@@ -20,6 +20,9 @@ alias lltree="eza -al --sort=name --tree --level=2"
 # show tree view of with an extra level (sub-sub-directories and their contents)
 alias lltree3="eza -al --sort=name --tree --level=3"
 
+# show tree view of directories only
+alias lldtree="eza -al --sort=name --tree --level=2 --only-dirs"
+
 # list only files of a certain type
 llf () {
     ll | grep --color=always "\.$1$"  

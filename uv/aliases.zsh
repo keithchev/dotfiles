@@ -1,3 +1,10 @@
+export UV_ENVS="$HOME/.venvs"
+
+uv-create() { uv venv "$UV_ENVS/$1" "${@:2}"; }
+uv-activate() { source "$UV_ENVS/$1/bin/activate"; }
+uv-ls() { ls "$UV_ENVS"; }
+uv-rm() { rm -rf "$UV_ENVS/$1"; }
+
 # uv-latest: print the versions of one or more packages resolved by uv.
 # This installs the packages ephemerally with uv, then prints the resolved versions.
 # Usage:

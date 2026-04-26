@@ -1,16 +1,23 @@
-# Load Claude OAuth token from dotfiles/.env if not already set
+# Load Claude credentials from dotfiles/.env if not already set
+# Requires either ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN
 function _load_claude_credentials() {
-  if [ -z "$ANTHROPIC_API_KEY" ]; then
-    local dotfiles_env="$HOME/projects/dotfiles/.env"
-    if [ -f "$dotfiles_env" ]; then
-      export ANTHROPIC_API_KEY=$(grep -E '^ANTHROPIC_API_KEY=' "$dotfiles_env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'")
-    fi
+  local dotfiles_env="$HOME/projects/dotfiles/.env"
 
-    if [ -z "$ANTHROPIC_API_KEY" ]; then
-      echo "Error: ANTHROPIC_API_KEY not found in environment or $dotfiles_env" >&2
-      echo "Please create $dotfiles_env with: ANTHROPIC_API_KEY=your_token_here" >&2
-      return 1
-    fi
+  # Load API key from .env if not set
+  if [ -z "$ANTHROPIC_API_KEY" ] && [ -f "$dotfiles_env" ]; then
+    export ANTHROPIC_API_KEY=$(grep -E '^ANTHROPIC_API_KEY=' "$dotfiles_env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'")
+  fi
+
+  # Load OAuth token from .env if not set
+  if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -f "$dotfiles_env" ]; then
+    export CLAUDE_CODE_OAUTH_TOKEN=$(grep -E '^CLAUDE_CODE_OAUTH_TOKEN=' "$dotfiles_env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'")
+  fi
+
+  # Require at least one credential
+  if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+    echo "Error: Neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN found in environment or $dotfiles_env" >&2
+    echo "Please set one of these variables or add to $dotfiles_env" >&2
+    return 1
   fi
   return 0
 }
@@ -70,7 +77,13 @@ function claude-docker() {
     -v "$abs_workspace":/workspace/"$workspace_name":rw
     -w /workspace/"$workspace_name"
     -v "$HOME/.claude":/home/claude/.claude:rw
-    -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"
+  )
+
+  # Add credentials as separate -e and VAR=value arguments
+  [[ -n "$ANTHROPIC_API_KEY" ]] && cmd+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
+  [[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]] && cmd+=(-e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
+
+  cmd+=(
     -e UV_PROJECT_ENVIRONMENT=".venv-for-claude"
     claude-code:local
   )

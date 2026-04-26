@@ -1,0 +1,67 @@
+#!/usr/bin/env -S uv run --script
+"""Find notes for a specific date from ~/notes/YYYY/YYYY-notes.md"""
+
+import sys
+import re
+from datetime import datetime
+from pathlib import Path
+
+
+def find_notes(date_str: str) -> str | None:
+    """Find notes for the given date (YYYY-MM-DD format)."""
+    try:
+        date = datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        print(f"Error: Invalid date format '{date_str}'. Use YYYY-MM-DD.", file=sys.stderr)
+        return None
+
+    year = date.year
+    notes_file = Path.home() / "Dropbox" / "notes" / str(year) / f"{year}-notes.md"
+
+    if not notes_file.exists():
+        print(f"Error: Notes file not found: {notes_file}", file=sys.stderr)
+        return None
+
+    # Build header pattern: "# Tue 1/10" (day of week + M/D, no leading zeros)
+    day_name = date.strftime("%a")  # e.g., "Tue"
+    month_day = f"{date.month}/{date.day}"  # e.g., "1/10" (no leading zeros)
+    header = f"# {day_name} {month_day}"
+
+    content = notes_file.read_text()
+    lines = content.split("\n")
+
+    # Find the header line
+    start_idx = None
+    for i, line in enumerate(lines):
+        if line.strip() == header:
+            start_idx = i
+            break
+
+    if start_idx is None:
+        print(f"Error: No notes found for {date_str} (looking for '{header}')", file=sys.stderr)
+        return None
+
+    # Collect lines until the next top-level header
+    result_lines = [lines[start_idx]]
+    for line in lines[start_idx + 1:]:
+        if re.match(r"^# ", line):
+            break
+        result_lines.append(line)
+
+    return "\n".join(result_lines).rstrip()
+
+
+def main():
+    if len(sys.argv) != 2:
+        print("Usage: find-notes YYYY-MM-DD", file=sys.stderr)
+        sys.exit(1)
+
+    result = find_notes(sys.argv[1])
+    if result is None:
+        sys.exit(1)
+
+    print(result)
+
+
+if __name__ == "__main__":
+    main()

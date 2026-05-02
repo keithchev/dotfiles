@@ -3,7 +3,7 @@
 
 import sys
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -22,23 +22,32 @@ def find_notes(date_str: str) -> str | None:
         print(f"Error: Notes file not found: {notes_file}", file=sys.stderr)
         return None
 
-    # Build header pattern: "# Tue 1/10" (day of week + M/D, no leading zeros)
-    day_name = date.strftime("%a")  # e.g., "Tue"
+    # Day abbreviation variants to try
+    day_abbrevs = {
+        0: ["Mon"],
+        1: ["Tue", "Tues"],
+        2: ["Wed", "Weds"],
+        3: ["Thu", "Thur", "Thurs"],
+        4: ["Fri"],
+        5: ["Sat"],
+        6: ["Sun"],
+    }
+
     month_day = f"{date.month}/{date.day}"  # e.g., "1/10" (no leading zeros)
-    header = f"# {day_name} {month_day}"
+    possible_headers = [f"# {abbr} {month_day}" for abbr in day_abbrevs[date.weekday()]]
 
     content = notes_file.read_text()
     lines = content.split("\n")
 
-    # Find the header line
+    # Find the header line, trying all possible abbreviations
     start_idx = None
     for i, line in enumerate(lines):
-        if line.strip() == header:
+        if line.strip() in possible_headers:
             start_idx = i
             break
 
     if start_idx is None:
-        print(f"Error: No notes found for {date_str} (looking for '{header}')", file=sys.stderr)
+        print(f"Error: No notes found for {date_str} (tried: {possible_headers})", file=sys.stderr)
         return None
 
     # Collect lines until the next top-level header
@@ -52,15 +61,36 @@ def find_notes(date_str: str) -> str | None:
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: find-notes YYYY-MM-DD", file=sys.stderr)
+    if len(sys.argv) == 2:
+        result = find_notes(sys.argv[1])
+        if result is None:
+            sys.exit(1)
+        print(result)
+    elif len(sys.argv) == 3:
+        date_str = sys.argv[1]
+        try:
+            num_days = int(sys.argv[2])
+        except ValueError:
+            print(f"Error: Invalid number of days '{sys.argv[2]}'.", file=sys.stderr)
+            sys.exit(1)
+        try:
+            start_date = datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            print(f"Error: Invalid date format '{date_str}'. Use YYYY-MM-DD.", file=sys.stderr)
+            sys.exit(1)
+        results = []
+        for i in range(num_days):
+            day = start_date + timedelta(days=i)
+            result = find_notes(day.strftime("%Y-%m-%d"))
+            if result is not None:
+                results.append(result)
+        if not results:
+            print("No notes found for the given date range.", file=sys.stderr)
+            sys.exit(1)
+        print("\n\n".join(results))
+    else:
+        print("Usage: find-notes YYYY-MM-DD [num_days]", file=sys.stderr)
         sys.exit(1)
-
-    result = find_notes(sys.argv[1])
-    if result is None:
-        sys.exit(1)
-
-    print(result)
 
 
 if __name__ == "__main__":

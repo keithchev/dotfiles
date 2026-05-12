@@ -46,12 +46,12 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Add to PATH
-ENV PATH="/home/$USERNAME/.local/bin:$PATH"
+# Add to PATH (include pnpm global bin)
+ENV PATH="/home/$USERNAME/.local/share/pnpm/bin:/home/$USERNAME/.local/bin:$PATH"
 
 # Configure pnpm to use node_modules_claude instead of node_modules
-RUN pnpm config set modules-dir node_modules_claude --global \
-    && pnpm config set virtual-store-dir node_modules_claude/.pnpm --global
+RUN echo "modules-dir=node_modules_claude" > /home/$USERNAME/.npmrc \
+    && echo "virtual-store-dir=node_modules_claude/.pnpm" >> /home/$USERNAME/.npmrc
 ENV NODE_PATH=node_modules_claude
 
 # Alias npm to pnpm so all installs go through pnpm (and use node_modules_claude)

@@ -13,11 +13,10 @@ function _load_claude_credentials() {
     export CLAUDE_CODE_OAUTH_TOKEN=$(grep -E '^CLAUDE_CODE_OAUTH_TOKEN=' "$dotfiles_env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'")
   fi
 
-  # Require at least one credential
+  # Warn if no credentials found, but don't abort
   if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
-    echo "Error: Neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN found in environment or $dotfiles_env" >&2
-    echo "Please set one of these variables or add to $dotfiles_env" >&2
-    return 1
+    echo "Warning: Neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN found in environment or $dotfiles_env" >&2
+    echo "The container will start without credentials." >&2
   fi
   return 0
 }
@@ -82,6 +81,13 @@ function claude-docker() {
   # Add credentials as separate -e and VAR=value arguments
   [[ -n "$ANTHROPIC_API_KEY" ]] && cmd+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
   [[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]] && cmd+=(-e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
+
+  # Pass AWS credentials from host (e.g., from `assume bedrock`) so the
+  # container doesn't need `assume` installed for auth refresh.
+  [[ -n "$AWS_ACCESS_KEY_ID" ]] && cmd+=(-e "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID")
+  [[ -n "$AWS_SECRET_ACCESS_KEY" ]] && cmd+=(-e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY")
+  [[ -n "$AWS_SESSION_TOKEN" ]] && cmd+=(-e "AWS_SESSION_TOKEN=$AWS_SESSION_TOKEN")
+  [[ -n "$AWS_REGION" ]] && cmd+=(-e "AWS_REGION=$AWS_REGION")
 
   cmd+=(
     -e UV_PROJECT_ENVIRONMENT=".venv-for-claude"

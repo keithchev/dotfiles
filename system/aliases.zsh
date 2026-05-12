@@ -3,6 +3,8 @@ alias d="cd ~/Dropbox"
 alias dl="cd ~/Downloads"
 alias pc="cd ~/projects-cloned"
 alias cd-ssh="cd ~/.ssh"
+alias cdd="cd .."
+alias cddd="cd ../.."
 
 alias edit-ssh-config="subl ~/.ssh/config"
 

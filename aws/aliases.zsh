@@ -31,6 +31,10 @@ function s3-rm-im-sure () {
     aws s3 rm s3://$1
 }
 
+function s3-fetch () {
+    uv run $DOTFILES/aws/s3_fetch.py "$@"
+}
+
 # list all ec2 instances as rows of (id, state, name)
 alias ec2-ls='aws ec2 describe-instances | \
     jq -r ".Reservations[].Instances[] | \

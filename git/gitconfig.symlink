@@ -54,6 +54,7 @@
 
 [push]
 	autoSetupRemote = true
+	negotiate = true
 
 [interactive]
     diffFilter = delta --color-only
@@ -64,3 +65,5 @@
     side-by-side = false
     # use n and N to move between diff sections
     navigate = true
+[fetch]
+	negotiationAlgorithm = skipping

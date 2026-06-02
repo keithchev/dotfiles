@@ -42,6 +42,15 @@ function claude-docker() {
   _load_claude_credentials || return 1
   _ensure_claude_docker_image || return 1
 
+  # If no AWS session creds are set, run 'assume' to obtain them
+  # (mirrors the awsAuthRefresh setting used by Claude locally)
+  if [[ -z "$AWS_ACCESS_KEY_ID" ]]; then
+    source /opt/homebrew/bin/assume bedrock --es || {
+      echo "Error: failed to obtain AWS credentials via 'assume bedrock'" >&2
+      return 1
+    }
+  fi
+
   local workspace="."
   local -a claude_args=()
 
@@ -69,13 +78,25 @@ function claude-docker() {
 
   local container_name="claude-${workspace_name}-$(date +%s)"
 
+  # Create a temp copy of ~/.claude with awsAuthRefresh stripped from
+  # settings.json (the host-side auth command won't work in the container)
+  local claude_mount="$HOME/.claude"
+  local claude_tmpdir=""
+  local host_settings="$HOME/.claude/settings.json"
+  if [[ -f "$host_settings" ]] && jq -e '.awsAuthRefresh' "$host_settings" >/dev/null 2>&1; then
+    claude_tmpdir="$(mktemp -d "$HOME"/.claude-docker-tmp.XXXXXX)"
+    cp -a "$HOME/.claude/." "$claude_tmpdir/"
+    jq 'del(.awsAuthRefresh) | del(.env.AWS_PROFILE)' "$host_settings" > "$claude_tmpdir/settings.json"
+    claude_mount="$claude_tmpdir"
+  fi
+
   local -a cmd=(
     docker run -it --rm
     --name "$container_name"
     --add-host host.docker.internal:host-gateway
     -v "$abs_workspace":/workspace/"$workspace_name":rw
     -w /workspace/"$workspace_name"
-    -v "$HOME/.claude":/home/claude/.claude:rw
+    -v "$claude_mount":/home/claude/.claude:rw
   )
 
   # Add credentials as separate -e and VAR=value arguments
@@ -105,6 +126,9 @@ function claude-docker() {
   # No extra args → Dockerfile CMD provides --dangerously-skip-permissions
 
   "${cmd[@]}"
+  local exit_code=$?
+  [[ -n "$claude_tmpdir" ]] && rm -rf "$claude_tmpdir"
+  return $exit_code
 }
 
 # Run Claude Code in the current directory

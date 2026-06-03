@@ -65,6 +65,9 @@ ENV NODE_PATH=node_modules_claude
 RUN printf '#!/bin/sh\nexec pnpm "$@"\n' > /home/$USERNAME/.local/bin/npm \
     && chmod +x /home/$USERNAME/.local/bin/npm
 
+# Pre-populate github host keys so ssh never prompts for unknown fingerprints.
+RUN mkdir -p ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+
 # Working directory - workspace subdirectory is mounted at runtime
 WORKDIR /workspace
 

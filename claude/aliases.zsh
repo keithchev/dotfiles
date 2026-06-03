@@ -78,16 +78,14 @@ function claude-docker() {
 
   local container_name="claude-${workspace_name}-$(date +%s)"
 
-  # Create a temp copy of ~/.claude with awsAuthRefresh stripped from
-  # settings.json (the host-side auth command won't work in the container)
-  local claude_mount="$HOME/.claude"
-  local claude_tmpdir=""
+  # If host settings.json has awsAuthRefresh, create a stripped copy to
+  # mount over just that file (the host-side auth command won't work in
+  # the container). The real ~/.claude is always mounted so sessions persist.
+  local settings_tmpfile=""
   local host_settings="$HOME/.claude/settings.json"
   if [[ -f "$host_settings" ]] && jq -e '.awsAuthRefresh' "$host_settings" >/dev/null 2>&1; then
-    claude_tmpdir="$(mktemp -d "$HOME"/.claude-docker-tmp.XXXXXX)"
-    cp -a "$HOME/.claude/." "$claude_tmpdir/"
-    jq 'del(.awsAuthRefresh) | del(.env.AWS_PROFILE)' "$host_settings" > "$claude_tmpdir/settings.json"
-    claude_mount="$claude_tmpdir"
+    settings_tmpfile="$(mktemp "$HOME/.claude/.docker-settings.XXXXXX")"
+    jq 'del(.awsAuthRefresh) | del(.env.AWS_PROFILE)' "$host_settings" > "$settings_tmpfile"
   fi
 
   local -a cmd=(
@@ -96,8 +94,11 @@ function claude-docker() {
     --add-host host.docker.internal:host-gateway
     -v "$abs_workspace":/workspace/"$workspace_name":rw
     -w /workspace/"$workspace_name"
-    -v "$claude_mount":/home/claude/.claude:rw
+    -v "$HOME/.claude":/home/claude/.claude:rw
   )
+
+  # Overlay just the modified settings.json if needed
+  [[ -n "$settings_tmpfile" ]] && cmd+=(-v "$settings_tmpfile":/home/claude/.claude/settings.json:ro)
 
   # Add credentials as separate -e and VAR=value arguments
   [[ -n "$ANTHROPIC_API_KEY" ]] && cmd+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
@@ -127,7 +128,7 @@ function claude-docker() {
 
   "${cmd[@]}"
   local exit_code=$?
-  [[ -n "$claude_tmpdir" ]] && rm -rf "$claude_tmpdir"
+  [[ -n "$settings_tmpfile" ]] && rm -f "$settings_tmpfile"
   return $exit_code
 }
 

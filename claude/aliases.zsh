@@ -42,10 +42,10 @@ function claude-docker() {
   _load_claude_credentials || return 1
   _ensure_claude_docker_image || return 1
 
-  # If no AWS session creds are set, run 'assume' to obtain them
-  # (mirrors the awsAuthRefresh setting used by Claude locally)
-  if [[ -z "$AWS_ACCESS_KEY_ID" ]]; then
-    source /opt/homebrew/bin/assume bedrock --es || {
+  # If no AWS session creds are set and 'assume' is available, run it to
+  # obtain them (mirrors the awsAuthRefresh setting used by Claude locally)
+  if [[ -z "$AWS_ACCESS_KEY_ID" ]] && (( $+commands[assume] )); then
+    source =assume bedrock --es || {
       echo "Error: failed to obtain AWS credentials via 'assume bedrock'" >&2
       return 1
     }

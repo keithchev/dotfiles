@@ -35,25 +35,26 @@ function s3-fetch () {
     uv run $DOTFILES/aws/s3_fetch.py "$@"
 }
 
-# list all ec2 instances as rows of (id, state, name)
-alias ec2-ls='aws ec2 describe-instances | \
-    jq -r ".Reservations[].Instances[] | \
-    (.InstanceId + \" \" + .State.Name + \" \" + ( .Tags[]? | select(.Key == \"Name\") | .Value))"'
+# list ec2 instances across the regions configured in ~/.aws-instances.yaml
+# rows of (region, id, state, name, alias). Pass --region to override.
+function ec2-ls () {
+    uv run $DOTFILES/aws/manage_instances.py ls "$@"
+}
 
 function ec2-start () {
-    uv run $DOTFILES/aws/manage_instances.py start $1
+    uv run $DOTFILES/aws/manage_instances.py start "$@"
 }
 
 function ec2-stop () {
-    uv run $DOTFILES/aws/manage_instances.py stop $1
+    uv run $DOTFILES/aws/manage_instances.py stop "$@"
 }
 
 function ec2-status () {
-    uv run $DOTFILES/aws/manage_instances.py status $1
+    uv run $DOTFILES/aws/manage_instances.py status "$@"
 }
 
 alias ec2-ls-aliases='uv run $DOTFILES/aws/manage_instances.py list'
 
 function ec2-add-alias () {
-    uv run $DOTFILES/aws/manage_instances.py add-alias $1 $2
+    uv run $DOTFILES/aws/manage_instances.py add-alias "$@"
 }

@@ -11,6 +11,9 @@
 This script provides a simple interface to start and stop EC2 instances by alias.
 
 It uses ~/.aws-instances.yaml to map manually-defined aliases to instance IDs.
+Each alias may also record the region the instance lives in, so start/stop/status
+target the right regional endpoint without needing a region passed every time.
+A top-level `regions:` list controls which regions `ls` scans for discovery.
 
 It was largely written by Claude.
 The shh config parser in particular is unreviewed but appears to work.
@@ -42,58 +45,112 @@ def format_timestamp_pst(timestamp) -> str:
     return pst_time.strftime("%Y-%m-%d %-I:%M%p")
 
 
-def load_instances_config() -> dict:
-    """
-    Load and parse the ~/.aws-instances.yaml configuration file.
+CONFIG_PATH = pathlib.Path.home() / ".aws-instances.yaml"
 
-    Returns:
-        Dictionary with instances mapping, or empty dict if file doesn't exist
-        or has no instances section.
+
+def _load_raw_config() -> dict:
+    """
+    Load and parse the whole ~/.aws-instances.yaml configuration file.
 
     Raises:
         FileNotFoundError: If config file doesn't exist
         ValueError: If YAML is invalid
     """
-    config_path = pathlib.Path.home() / ".aws-instances.yaml"
-
-    if not config_path.exists():
+    if not CONFIG_PATH.exists():
         raise FileNotFoundError(
-            f"Instance alias config not found at {config_path}. "
-            f"Create a YAML file with format: instances:\n  alias: i-instanceid"
+            f"Instance alias config not found at {CONFIG_PATH}. "
+            f"Create a YAML file with format:\n"
+            f"instances:\n  alias:\n    id: i-instanceid\n    region: us-west-2"
         )
 
     try:
-        with config_path.open("r", encoding="utf-8") as f:
+        with CONFIG_PATH.open("r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
     except yaml.YAMLError as e:
-        raise ValueError(f"Invalid YAML in {config_path}: {e}")
+        raise ValueError(f"Invalid YAML in {CONFIG_PATH}: {e}")
 
-    return config.get("instances", {})
+    return config or {}
 
 
-def get_instance_id_by_alias(alias: str) -> str:
+def load_instances_config() -> dict:
     """
-    Look up instance ID by alias from ~/.aws-instances.yaml
+    Return the raw aliases mapping (alias -> id string, or {id, region} dict).
+
+    Returns an empty dict if the file has no `instances:` section.
+    """
+    return _load_raw_config().get("instances", {})
+
+
+def load_regions_config() -> list:
+    """Return the list of regions to scan for discovery commands (ec2-ls)."""
+    return _load_raw_config().get("regions", []) or []
+
+
+def _normalize_entry(alias: str, value) -> Tuple[str, Optional[str]]:
+    """
+    Normalize a config instance entry into (instance_id, region).
+
+    Supports both the legacy string form (``alias: i-xxxx``) and the dict
+    form (``alias: {id: i-xxxx, region: us-west-2}``). Region is None when
+    not recorded, in which case boto3's default region is used.
 
     Expected YAML format:
     instances:
-      alias-name: i-1234567890abcdef0
-      another-alias: i-abcdef1234567890
+      alias-name:
+        id: i-1234567890abcdef0
+        region: us-west-2
+      legacy-alias: i-abcdef1234567890   # still supported
     """
+    if isinstance(value, str):
+        instance_id, region = value, None
+    elif isinstance(value, dict):
+        instance_id = value.get("id")
+        region = value.get("region")
+        if not instance_id:
+            raise ValueError(f"Alias '{alias}' is missing an 'id' field.")
+    else:
+        raise ValueError(f"Invalid config entry for alias '{alias}': {value!r}")
+
+    if not str(instance_id).startswith("i-"):
+        raise ValueError(
+            f"Invalid instance ID '{instance_id}' for alias '{alias}'. "
+            f"Instance IDs must start with 'i-'."
+        )
+
+    return instance_id, region
+
+
+def resolve_alias(alias: str) -> Tuple[str, Optional[str]]:
+    """Look up (instance_id, region) by alias from ~/.aws-instances.yaml."""
     instances = load_instances_config()
 
     if alias not in instances:
         available = ", ".join(instances.keys())
         raise ValueError(f"Alias '{alias}' not found. Available aliases: {available}")
 
-    instance_id = instances[alias]
-    if not instance_id.startswith("i-"):
-        raise ValueError(
-            f"Invalid instance ID '{instance_id}' for alias '{alias}'. "
-            f"Instance IDs must start with 'i-'."
-        )
+    return _normalize_entry(alias, instances[alias])
 
-    return instance_id
+
+def get_instance_id_by_alias(alias: str) -> str:
+    """Back-compat helper: return only the instance ID for an alias."""
+    return resolve_alias(alias)[0]
+
+
+def resolve_instance_and_region(
+    instance_id_or_alias: str, region: Optional[str]
+) -> Tuple[str, Optional[str]]:
+    """
+    Resolve an instance ID and its effective region.
+
+    An explicitly-passed region always wins; otherwise the region recorded
+    alongside the alias is used; otherwise None (boto3's default region).
+    Raw ``i-...`` IDs carry no configured region, so they use whatever region
+    was passed (or the default).
+    """
+    if instance_id_or_alias.startswith("i-"):
+        return instance_id_or_alias, region
+    instance_id, alias_region = resolve_alias(instance_id_or_alias)
+    return instance_id, (region or alias_region)
 
 
 def start_instance_and_get_ip(
@@ -107,18 +164,14 @@ def start_instance_and_get_ip(
     then poll until a PublicIpAddress is available.
     Returns (state, public_ip).
     """
+    instance_id, region = resolve_instance_and_region(instance_id_or_alias, region)
+
     session_kwargs = {}
     if profile:
         session_kwargs["profile_name"] = profile
     session = boto3.Session(**session_kwargs)
 
     ec2 = session.client("ec2", region_name=region)
-
-    instance_id: str
-    if instance_id_or_alias.startswith("i-"):
-        instance_id = instance_id_or_alias
-    else:
-        instance_id = get_instance_id_by_alias(instance_id_or_alias)
 
     # Check current state before starting
     resp = ec2.describe_instances(InstanceIds=[instance_id])
@@ -180,18 +233,14 @@ def stop_instance(
     Stop the instance (no-op if already stopped), wait for 'stopped'.
     Returns the final state.
     """
+    instance_id, region = resolve_instance_and_region(instance_id_or_alias, region)
+
     session_kwargs = {}
     if profile:
         session_kwargs["profile_name"] = profile
     session = boto3.Session(**session_kwargs)
 
     ec2 = session.client("ec2", region_name=region)
-
-    instance_id: str
-    if instance_id_or_alias.startswith("i-"):
-        instance_id = instance_id_or_alias
-    else:
-        instance_id = get_instance_id_by_alias(instance_id_or_alias)
 
     # Try to stop; if already stopped, AWS won't error.
     try:
@@ -339,7 +388,7 @@ def cli():
     help="Host alias in ~/.ssh/config to update (if different from instance alias)",
 )
 @click.option("--profile", help="AWS profile name")
-@click.option("--region", help="AWS region (e.g., us-west-2)")
+@click.option("--region", help="AWS region (overrides the alias's configured region)")
 @click.option("--timeout", default=60, help="Timeout in seconds")
 def start(instance, host_alias, profile, region, timeout):
     """Start an EC2 instance and update SSH config."""
@@ -357,7 +406,7 @@ def start(instance, host_alias, profile, region, timeout):
 @cli.command()
 @click.argument("instance")
 @click.option("--profile", help="AWS profile name")
-@click.option("--region", help="AWS region (e.g., us-west-2)")
+@click.option("--region", help="AWS region (overrides the alias's configured region)")
 @click.option("--timeout", default=300, help="Timeout in seconds")
 def stop(instance, profile, region, timeout):
     """Stop an EC2 instance."""
@@ -373,17 +422,16 @@ def stop(instance, profile, region, timeout):
 @cli.command("add-alias")
 @click.argument("alias")
 @click.argument("instance_id")
-def add_alias(alias, instance_id):
+@click.option("--region", help="Region the instance lives in (recorded with the alias)")
+def add_alias(alias, instance_id, region):
     """Add an alias for an instance ID to the config file."""
     if not instance_id.startswith("i-"):
         click.echo(f"Error: Instance ID must start with 'i-', got '{instance_id}'")
         return
 
-    config_path = pathlib.Path.home() / ".aws-instances.yaml"
-
     config = {}
-    if config_path.exists():
-        with config_path.open("r", encoding="utf-8") as f:
+    if CONFIG_PATH.exists():
+        with CONFIG_PATH.open("r", encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
 
     if "instances" not in config:
@@ -394,25 +442,30 @@ def add_alias(alias, instance_id):
         if not click.confirm("Overwrite?"):
             return
 
-    config["instances"][alias] = instance_id
+    if region:
+        config["instances"][alias] = {"id": instance_id, "region": region}
+    else:
+        config["instances"][alias] = instance_id
 
-    with config_path.open("w", encoding="utf-8") as f:
+    with CONFIG_PATH.open("w", encoding="utf-8") as f:
         yaml.dump(config, f, default_flow_style=False)
 
-    click.echo(f"Added alias: {alias} -> {instance_id}")
+    suffix = f" ({region})" if region else ""
+    click.echo(f"Added alias: {alias} -> {instance_id}{suffix}")
 
 
-@cli.command()
-def list():
+@cli.command("list")
+def list_aliases():
     """List all instance aliases from the config file."""
     try:
         instances = load_instances_config()
     except FileNotFoundError:
-        config_path = pathlib.Path.home() / ".aws-instances.yaml"
-        click.echo(f"Config file not found at {config_path}")
+        click.echo(f"Config file not found at {CONFIG_PATH}")
         click.echo("Create a YAML file with format:")
         click.echo("instances:")
-        click.echo("  alias-name: i-1234567890abcdef0")
+        click.echo("  alias-name:")
+        click.echo("    id: i-1234567890abcdef0")
+        click.echo("    region: us-west-2")
         return
     except ValueError as e:
         click.echo(f"Error reading config: {e}")
@@ -423,53 +476,23 @@ def list():
         return
 
     click.echo("Available instance aliases:")
-    for alias, instance_id in instances.items():
-        click.echo(f"  {alias} -> {instance_id}")
-
-
-@cli.command()
-@click.argument("instance", required=False)
-@click.option("--profile", help="AWS profile name")
-@click.option("--region", help="AWS region (e.g., us-west-2)")
-def status(instance, profile, region):
-    """Show instance status. If no instance specified, shows status for all aliases."""
-    session_kwargs = {}
-    if profile:
-        session_kwargs["profile_name"] = profile
-    session = boto3.Session(**session_kwargs)
-
-    ec2 = session.client("ec2", region_name=region)
-
-    instance_ids = []
-
-    if instance:
-        # Single instance specified
-        if instance.startswith("i-"):
-            instance_ids = [instance]
-        else:
-            try:
-                instance_id = get_instance_id_by_alias(instance)
-                instance_ids = [instance_id]
-            except (FileNotFoundError, ValueError) as e:
-                click.echo(f"Error: {e}")
-                return
-    else:
-        # No instance specified - get all from config
+    for alias, value in instances.items():
         try:
-            instances_config = load_instances_config()
-        except FileNotFoundError:
-            click.echo("Config file not found and no instance specified")
-            return
+            instance_id, region = _normalize_entry(alias, value)
         except ValueError as e:
-            click.echo(f"Error reading config: {e}")
-            return
+            click.echo(f"  {alias} -> (invalid: {e})")
+            continue
+        region_str = f"  [{region}]" if region else "  [default region]"
+        click.echo(f"  {alias} -> {instance_id}{region_str}")
 
-        if not instances_config:
-            click.echo("No instances found in config file")
-            return
+    regions = load_regions_config()
+    if regions:
+        click.echo("")
+        click.echo(f"ec2-ls scan regions: {', '.join(regions)}")
 
-        instance_ids = list(instances_config.values())
 
+def _print_status_for_region(ec2, instance_ids, alias_by_id, region):
+    """Describe and pretty-print status for a set of instance IDs in one region."""
     describe_response = ec2.describe_instances(InstanceIds=instance_ids)
     status_response = ec2.describe_instance_status(
         InstanceIds=instance_ids, IncludeAllInstances=True
@@ -487,10 +510,10 @@ def status(instance, profile, region):
             instance_type = inst["InstanceType"]
             public_ip = inst.get("PublicIpAddress", "N/A")
             private_ip = inst.get("PrivateIpAddress", "N/A")
-            
+
             # Format launch time in PST
             launch_time = format_timestamp_pst(inst.get("LaunchTime"))
-            
+
             # Get state transition time for all states
             state_transition_time = format_timestamp_pst(inst["State"].get("TransitionTime"))
 
@@ -502,17 +525,7 @@ def status(instance, profile, region):
             else:
                 instance_region = region or "N/A"
 
-            # Find alias for this instance
-            alias = "N/A"
-            if not instance or not instance.startswith("i-"):
-                try:
-                    instances_config = load_instances_config()
-                    for a, iid in instances_config.items():
-                        if iid == instance_id:
-                            alias = a
-                            break
-                except (FileNotFoundError, ValueError):
-                    pass
+            alias = alias_by_id.get(instance_id, "N/A")
 
             name = "N/A"
             for tag in inst.get("Tags", []):
@@ -596,6 +609,127 @@ def status(instance, profile, region):
                 click.echo("  System Status: N/A")
 
             click.echo("")
+
+
+@cli.command()
+@click.argument("instance", required=False)
+@click.option("--profile", help="AWS profile name")
+@click.option("--region", help="AWS region (overrides the alias's configured region)")
+def status(instance, profile, region):
+    """Show instance status. If no instance specified, shows status for all aliases."""
+    session_kwargs = {}
+    if profile:
+        session_kwargs["profile_name"] = profile
+    session = boto3.Session(**session_kwargs)
+
+    # Build the list of (instance_id, effective_region) targets plus an
+    # id -> alias lookup for labeling the output.
+    targets: list = []
+    alias_by_id: dict = {}
+
+    if instance:
+        try:
+            instance_id, eff_region = resolve_instance_and_region(instance, region)
+        except (FileNotFoundError, ValueError) as e:
+            click.echo(f"Error: {e}")
+            return
+        targets.append((instance_id, eff_region))
+        if not instance.startswith("i-"):
+            alias_by_id[instance_id] = instance
+    else:
+        # No instance specified - get all from config
+        try:
+            instances_config = load_instances_config()
+        except FileNotFoundError:
+            click.echo("Config file not found and no instance specified")
+            return
+        except ValueError as e:
+            click.echo(f"Error reading config: {e}")
+            return
+
+        if not instances_config:
+            click.echo("No instances found in config file")
+            return
+
+        for alias, value in instances_config.items():
+            try:
+                iid, alias_region = _normalize_entry(alias, value)
+            except ValueError as e:
+                click.echo(f"Skipping alias '{alias}': {e}")
+                continue
+            targets.append((iid, region or alias_region))
+            alias_by_id[iid] = alias
+
+    # Group instance IDs by their effective region so each describe call hits
+    # the correct regional endpoint (instances can live in different regions).
+    by_region: dict = {}
+    for iid, eff_region in targets:
+        by_region.setdefault(eff_region, []).append(iid)
+
+    for eff_region, instance_ids in by_region.items():
+        ec2 = session.client("ec2", region_name=eff_region)
+        try:
+            _print_status_for_region(ec2, instance_ids, alias_by_id, eff_region)
+        except ClientError as e:
+            click.echo(f"Error querying region {eff_region or 'default'}: {e}")
+
+
+@cli.command()
+@click.option(
+    "--region",
+    "regions",
+    multiple=True,
+    help="Region(s) to scan; overrides the configured `regions:` list. Repeatable.",
+)
+@click.option("--profile", help="AWS profile name")
+def ls(regions, profile):
+    """List all EC2 instances across the configured regions."""
+    session_kwargs = {}
+    if profile:
+        session_kwargs["profile_name"] = profile
+    session = boto3.Session(**session_kwargs)
+
+    region_list = list(regions)
+    if not region_list:
+        try:
+            region_list = load_regions_config()
+        except (FileNotFoundError, ValueError):
+            region_list = []
+    # Fall back to the default region (None lets boto3 decide) when nothing
+    # is configured, so `ec2-ls` still works without a config file.
+    if not region_list:
+        region_list = [None]
+
+    # Build an id -> alias lookup to annotate rows with their alias, if any.
+    alias_by_id: dict = {}
+    try:
+        for alias, value in load_instances_config().items():
+            try:
+                iid, _ = _normalize_entry(alias, value)
+                alias_by_id[iid] = alias
+            except ValueError:
+                continue
+    except (FileNotFoundError, ValueError):
+        pass
+
+    for r in region_list:
+        try:
+            ec2 = session.client("ec2", region_name=r)
+            resp = ec2.describe_instances()
+        except ClientError as e:
+            click.echo(f"# {r or 'default'}: error: {e}")
+            continue
+
+        for reservation in resp.get("Reservations", []):
+            for inst in reservation.get("Instances", []):
+                iid = inst["InstanceId"]
+                state = inst["State"]["Name"]
+                name = next(
+                    (t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"),
+                    "",
+                )
+                alias = alias_by_id.get(iid, "")
+                click.echo(f"{r or 'default'}\t{iid}\t{state}\t{name}\t{alias}")
 
 
 if __name__ == "__main__":

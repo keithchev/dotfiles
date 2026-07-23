@@ -172,3 +172,28 @@ alias cdock='claude-docker'
 alias cdock-here='claude-docker-here'
 alias cdock-project='claude-docker-project'
 alias cdock-rebuild='claude-docker-rebuild'
+
+# Pretty-print a table of local Claude Code sessions.
+# Passes through flags like -a (all), -k <dir>, -n <limit>, --sort.
+function ls-claude() {
+    uv run $DOTFILES/claude/session_table.py "$@"
+}
+
+# Resume a Claude Code session by (abbreviated) session id from `ls-claude`.
+# cd's into the session's directory, then resumes it in DSP mode.
+# Usage: run-claude <session-id>
+function run-claude() {
+    if [ -z "$1" ]; then
+        echo "Usage: run-claude <session-id>  (see 'ls-claude -a')" >&2
+        return 1
+    fi
+
+    local resolved
+    resolved="$(uv run $DOTFILES/claude/session_table.py --resolve "$1")" || return 1
+
+    local session_id="${resolved%%$'\t'*}"
+    local dir="${resolved#*$'\t'}"
+
+    cd "$dir" || return 1
+    claude --dangerously-skip-permissions --resume "$session_id"
+}

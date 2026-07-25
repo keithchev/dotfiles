@@ -3,3 +3,4 @@
 .DS_Store
 git/gitconfig.local.symlink
 .env
+bin/__pycache__/

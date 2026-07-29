@@ -1,0 +1,4 @@
+# block very new releases as a defense against supply chain attacks
+minimumReleaseAge: 10080 # minutes (7 days)
+ignoreDepScripts: true
+blockExoticSubdeps: true

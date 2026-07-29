@@ -1,0 +1,2 @@
+# block very new releases as a defense against supply chain attacks
+exclude-newer = "7 days"

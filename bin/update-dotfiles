@@ -7,7 +7,7 @@
 
 set -e
 
-parentDirectory="$(cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd -P)"
+parentDirectory="$(cd "$( dirname "$0" )" && pwd -P)"
 dotfilesDirectory="$(cd "$( dirname "$parentDirectory" )" && pwd -P)"
 
 displayUsageAndExit() {
@@ -38,8 +38,10 @@ while test $# -gt 0; do
 	shift
 done
 
-# Set macOS defaults
-$DOTFILES/macos/set-defaults.sh
+# Set macOS defaults (only on macOS)
+if [ "$(uname -s)" = "Darwin" ]; then
+	$DOTFILES/macos/set-defaults.sh
+fi
 
 # call the install.sh script in each directory
 echo "› $DOTFILES/script/install"

@@ -1,9 +1,9 @@
-alias ca="conda activate"
-alias cls="conda env list"
+alias mls="mamba list"
+alias mels="mamba env list"
 
 # delete a virtualenv
-function conda-rm () {
-    conda remove -y -n $1 --all
+function mamba-rm () {
+    mamba remove -y -n $1 --all
 }
 
 # create a virtualenv with a specific python version
@@ -13,3 +13,5 @@ function mamba-create () {
     local packages="${@:3}"
     mamba create -y -n $name python=$python $packages
 }
+
+alias mc="mamba-create"

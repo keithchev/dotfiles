@@ -168,6 +168,8 @@ function claude-docker-rebuild() {
     "$HOME/projects/dotfiles/claude" || return 1
 }
 
+alias yolo-claude='claude --dangerously-skip-permissions'
+
 alias cdock='claude-docker'
 alias cdock-here='claude-docker-here'
 alias cdock-project='claude-docker-project'

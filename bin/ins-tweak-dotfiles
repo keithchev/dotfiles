@@ -1,0 +1,17 @@
+#!/bin/sh
+#
+# ins-tweak-dotfiles
+#
+# Undo select dotfiles configuration for use on insitro machines.
+
+set -e
+
+UV_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/uv"
+
+# Remove the symlinked uv.toml
+if [ -L "$UV_CONFIG_DIR/uv.toml" ]; then
+  rm "$UV_CONFIG_DIR/uv.toml"
+  echo "Removed symlink $UV_CONFIG_DIR/uv.toml"
+else
+  echo "No symlink found at $UV_CONFIG_DIR/uv.toml, skipping"
+fi

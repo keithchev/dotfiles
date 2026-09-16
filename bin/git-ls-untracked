@@ -1,0 +1,5 @@
+#!/bin/sh
+#
+# List all local branches without a remote-tracking branch
+
+git branch -vv | grep 'origin/.*: gone]' | awk '{print $1}'

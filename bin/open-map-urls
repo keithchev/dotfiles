@@ -1,0 +1,125 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""
+This script takes a URL from either Google Maps, CalTopo, or Gaia
+and opens the same location in all three mapping services.
+
+Written in November 2024.
+"""
+
+import enum
+import math
+import sys
+import re
+import webbrowser
+from urllib.parse import urlparse, parse_qs, urlencode
+
+
+class MapURLRoot(enum.Enum):
+    GOOGLE_MAPS = "google.com/maps"
+    CALTOPO = "caltopo.com/map.html"
+    GAIA = "gaiagps.com/map"
+    STRAVA = "strava.com/maps"
+
+
+def parse_url(url):
+    if MapURLRoot.GOOGLE_MAPS.value in url:
+        map_url = MapURLRoot.GOOGLE_MAPS
+        # Match either "z" (standard) or "m" (satellite view) zoom level.
+        match_z = re.search(r"@([-\d.]+),([-\d.]+),([\d.]+)z", url)
+        match_m = re.search(r"@([-\d.]+),([-\d.]+),([\d.]+)m", url)
+        if match_z:
+            lat, lon, zoom = map(float, match_z.groups())
+        elif match_m:
+            lat, lon, altitude_m = map(float, match_m.groups())
+            # Convert altitude in meters to approximate zoom level.
+            # (This conversion was derived empirically from a few data points.)
+            zoom = 27 - math.log2(altitude_m)
+
+    elif MapURLRoot.CALTOPO.value in url:
+        map_url = MapURLRoot.CALTOPO
+        parsed = urlparse(url)
+        if "ll" in parsed.fragment:
+            fragment = parsed.fragment
+            match = re.search(r"ll=([-\d.]+),([-\d.]+)&z=(\d+)", fragment)
+            if match:
+                lat, lon, zoom = (
+                    float(match.group(1)),
+                    float(match.group(2)),
+                    int(match.group(3)),
+                )
+
+    elif MapURLRoot.GAIA.value in url:
+        map_url = MapURLRoot.GAIA
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        if "loc" in params:
+            loc = params["loc"][0]
+            zoom, lon, lat = map(float, loc.split("/"))
+            # Gaia uses zoom levels that are one lower than Google Maps and CalTopo.
+            zoom += 1
+
+    elif MapURLRoot.STRAVA.value in url:
+        map_url = MapURLRoot.STRAVA
+        parsed = urlparse(url)
+        if parsed.fragment:
+            fragment = parsed.fragment
+            match = re.search(r"([\d.]+)/([-\d.]+)/([-\d.]+)", fragment)
+            if match:
+                zoom, lat, lon = (
+                    float(match.group(1)),
+                    float(match.group(2)),
+                    float(match.group(3)),
+                )
+    else:
+        raise ValueError(f'Invalid URL: "{url}"')
+
+    return map_url, lat, lon, zoom
+
+
+def open_map_urls(input_map_url_root, lat, lon, zoom):
+    google_maps_url = f"https://www.google.com/maps/@{lat},{lon},{zoom}z"
+
+    # CalTopo uses integer zoom levels.
+    caltopo_zoom = int(zoom)
+    caltopo_url = f"https://caltopo.com/map.html#ll={lat},{lon}&z={caltopo_zoom}&b=mbt"
+
+    # Gaia uses zoom levels that are one lower than Google Maps and CalTopo.
+    gaia_zoom = zoom - 1
+    gaia_params = {"loc": f"{gaia_zoom}/{lon}/{lat}"}
+    gaia_url = f"https://www.gaiagps.com/map/?{urlencode(gaia_params)}"
+
+    # Construct the Strava Global Heatmap URL.
+    strava_params = {
+        "sport": "RunLike",
+        "style": "winter",
+        "terrain": "false",
+        "labels": "true",
+        "poi": "true",
+        "gColor": "hot",
+        "gOpacity": "100",
+        "cPhotos": "false",
+        "sType": "creator",
+        "sElevation": "all",
+        "sSurface": "0",
+        "sMin": "0",
+    }
+    strava_url = f"https://www.strava.com/maps/global-heatmap/segments?{urlencode(strava_params)}#{zoom}/{lat}/{lon}"
+
+    for url in [google_maps_url, caltopo_url, gaia_url, strava_url]:
+        if input_map_url_root.value in url:
+            continue
+        webbrowser.open(url)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: open-map-urls <url>")
+        sys.exit(1)
+
+    input_url = sys.argv[1]
+    input_map_url_root, latitude, longitude, zoom_level = parse_url(input_url)
+    open_map_urls(input_map_url_root, latitude, longitude, zoom_level)

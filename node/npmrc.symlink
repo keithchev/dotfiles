@@ -1,0 +1,3 @@
+# block very new releases as a defense against supply chain attacks
+min-release-age=7 # days
+ignore-scripts=true

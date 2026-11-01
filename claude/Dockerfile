@@ -27,11 +27,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o 
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
     && apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js LTS and enable pnpm via corepack
+# Install Node.js LTS and pnpm. (Recent NodeSource nodejs packages no longer
+# bundle corepack, so install pnpm directly via npm rather than corepack.)
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
     && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/* \
-    && corepack enable \
-    && corepack prepare pnpm@latest --activate
+    && npm install -g pnpm@latest
 
 # Create non-root user
 ARG USERNAME=claude
@@ -47,8 +47,13 @@ RUN groupadd --gid $USER_GID $USERNAME 2>/dev/null || groupmod -n $USERNAME $(ge
 USER $USERNAME
 WORKDIR /home/$USERNAME
 
-# Install Claude Code (installs to ~/.local/bin)
-RUN curl -fsSL https://claude.ai/install.sh | bash
+# Install Claude Code (installs to ~/.local/bin).
+# CLAUDE_CODE_VERSION selects the release channel (stable|latest|X.Y.Z).
+# CACHEBUST lets `cdock-rebuild` force a re-fetch of the current release
+# without invalidating the (expensive) layers above it.
+ARG CLAUDE_CODE_VERSION=latest
+ARG CACHEBUST=0
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "$CLAUDE_CODE_VERSION"
 
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh

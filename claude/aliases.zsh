@@ -97,6 +97,15 @@ function claude-docker() {
     -v "$HOME/.claude":/home/claude/.claude:rw
   )
 
+  # The statusline script in ~/.claude is a symlink into the dotfiles repo.
+  # Mount the repo read-only at its real host path so the symlink resolves
+  # inside the container (otherwise the status line command exits 127).
+  local statusline="$HOME/.claude/statusline-command.sh"
+  if [[ -L "$statusline" ]]; then
+    local repo_root="${statusline:A:h:h}"
+    [[ -d "$repo_root" ]] && cmd+=(-v "$repo_root":"$repo_root":ro)
+  fi
+
   # Overlay just the modified settings.json if needed
   [[ -n "$settings_tmpfile" ]] && cmd+=(-v "$settings_tmpfile":/home/claude/.claude/settings.json:ro)
 
@@ -160,11 +169,14 @@ function claude-docker-project() {
 }
 
 # Rebuild the Claude Code Docker image
+# Passes a fresh CACHEBUST so the Claude Code install layer re-runs and the
+# latest release is fetched, without rebuilding the layers above it.
 function claude-docker-rebuild() {
   echo "Rebuilding Claude Code Docker image..." >&2
   docker build -t claude-code:local \
     --build-arg USER_UID=$(id -u) \
     --build-arg USER_GID=$(id -g) \
+    --build-arg CACHEBUST=$(date +%s) \
     "$HOME/projects/dotfiles/claude" || return 1
 }
 

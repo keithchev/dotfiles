@@ -44,6 +44,7 @@ class Session:
     custom_title: str | None = None  # explicit name from /rename (in transcript)
     user_name: str | None = None  # explicit name from live-session file
     first_prompt: str | None = None
+    started: str | None = None  # earliest record timestamp (ISO-8601)
     message_count: int = 0
     status: str | None = None  # live status, if running
     versions: set[str] = field(default_factory=set)
@@ -127,6 +128,12 @@ def _scan_transcript(path: Path) -> Session:
             if rec.get("version"):
                 sess.versions.add(rec["version"])
 
+            # Earliest record timestamp = when the session started. ISO-8601
+            # UTC strings sort lexicographically, so plain min() is correct.
+            ts = rec.get("timestamp")
+            if ts and (sess.started is None or ts < sess.started):
+                sess.started = ts
+
             if rtype in ("user", "assistant"):
                 sess.message_count += 1
 
@@ -204,6 +211,22 @@ def _home_rel(cwd: str | None) -> str:
     return cwd
 
 
+def _display_dir(s: "Session") -> str:
+    """Directory string for the table: the real cwd if the transcript recorded
+    one, otherwise the raw Claude project folder name the session lives under.
+
+    The folder name is the cwd with every ``/`` replaced by ``-`` (so
+    ``/Users/kc/app`` -> ``-Users-kc-app``). We show it verbatim rather than
+    trying to decode it: the encoding is lossy -- a literal dash in a path
+    component is indistinguishable from a separator -- so a reconstructed path
+    would be a guess. The raw name is still enough to recognise the project,
+    and it is display-only (never written to ``Session.cwd`` or fed to
+    ``run-claude``)."""
+    if s.cwd:
+        return _home_rel(s.cwd)
+    return s.path.parent.name or "(unknown)"
+
+
 def render_table(sessions: list[Session], limit: int | None = None) -> str:
     rows = []
     for s in sessions:
@@ -213,8 +236,9 @@ def render_table(sessions: list[Session], limit: int | None = None) -> str:
         rows.append(
             [
                 marker + _fmt_age(s.mtime),
+                (s.started[:10] if s.started else "-"),
                 renamed + _shorten(s.name, 46),
-                _shorten(_home_rel(s.cwd), 34),
+                _shorten(_display_dir(s), 34),
                 _shorten(s.git_branch or "-", 16),
                 str(s.message_count),
                 s.session_id[:8],
@@ -223,7 +247,7 @@ def render_table(sessions: list[Session], limit: int | None = None) -> str:
     if limit:
         rows = rows[:limit]
 
-    headers = ["Modified", "Name", "Directory", "Branch", "Msgs", "Session"]
+    headers = ["Modified", "Started", "Name", "Directory", "Branch", "Msgs", "Session"]
     widths = [len(h) for h in headers]
     for row in rows:
         for i, cell in enumerate(row):
@@ -261,7 +285,7 @@ def _resolve_and_exit(session_id: str) -> None:
             file=sys.stderr,
         )
         for s in matches:
-            print(f"  {s.session_id[:8]}  {_home_rel(s.cwd)}", file=sys.stderr)
+            print(f"  {s.session_id[:8]}  {_display_dir(s)}", file=sys.stderr)
         raise SystemExit(1)
 
     s = matches[0]

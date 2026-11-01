@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+#
+# Persistent ssh port forwarding in the background, using autossh.
+# (install with `brew install autossh` or `apt install autossh`)
+#
+#   port-forward start <host> -p <local>[:<remote>]   forward localhost:<local> to <host>:<remote>
+#   port-forward stop [<host>] [-p <local>]           stop forwards matching host and/or port
+#   port-forward stop -a|--all                        stop all forwards
+#   port-forward ls                                   list forwards
+#
+# State (pid and log files) is kept in ~/.port-forward.
+
+set -euo pipefail
+
+DIR="$HOME/.port-forward"
+mkdir -p "$DIR"
+
+usage() { sed -n '6,9s/^# *//p' "$0" >&2; exit "${1:-1}"; }
+
+# True if the pid in the given pidfile is a live autossh process.
+alive() {
+  local pid
+  pid=$(cat "$1" 2>/dev/null) || return 1
+  [[ -n $pid ]] && ps -p "$pid" -o comm= 2>/dev/null | grep -q autossh
+}
+
+# True if a child (ssh) of the given autossh pid is listening on the given port.
+child_listening() {
+  local child
+  for child in $(pgrep -P "$1"); do
+    lsof -a -p "$child" -iTCP:"$2" -sTCP:LISTEN >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+
+# Print the -L spec from the autossh command line, e.g. "8080:localhost:8080".
+forward_spec() {
+  ps -p "$(cat "$1")" -o args= 2>/dev/null | sed -nE 's/.*-L ([^ ]+).*/\1/p'
+}
+
+cmd=${1:-}
+shift || true
+
+host=""
+port=""
+all=""
+while (($#)); do
+  case $1 in
+    -p) port=${2:-}; shift 2 || usage ;;
+    -p*) port=${1#-p}; shift ;;
+    -a|--all) all=1; shift ;;
+    -h|--help) usage 0 ;;
+    -*) usage ;;
+    *) [[ -z $host ]] || usage; host=$1; shift ;;
+  esac
+done
+
+lport="" rport=""
+if [[ -n $port ]]; then
+  [[ $port =~ ^[0-9]+(:[0-9]+)?$ ]] || { echo "invalid port: $port" >&2; exit 1; }
+  lport=${port%%:*}
+  rport=${port##*:}
+fi
+
+case $cmd in
+  start)
+    [[ -n $host && -n $port ]] || usage
+    command -v autossh >/dev/null || { echo "autossh not found (brew install autossh)" >&2; exit 1; }
+
+    name="$host:$lport"
+    pidf="$DIR/$name.pid"
+    logf="$DIR/$name.log"
+
+    if alive "$pidf"; then
+      echo "already forwarding localhost:$lport -> $host:$(forward_spec "$pidf" | cut -d: -f3)"
+      exit 0
+    fi
+    rm -f "$pidf"
+
+    if lsof -iTCP:"$lport" -sTCP:LISTEN >/dev/null 2>&1; then
+      echo "local port $lport is already in use" >&2
+      exit 1
+    fi
+
+    # -M 0 disables autossh's monitor port in favor of ssh's own keepalives;
+    # BatchMode prevents a backgrounded ssh from hanging on a password prompt.
+    : > "$logf"
+    AUTOSSH_PIDFILE="$pidf" autossh -M 0 -f \
+      -N -E "$logf" \
+      -o BatchMode=yes \
+      -o ExitOnForwardFailure=yes \
+      -o ServerAliveInterval=15 \
+      -o ServerAliveCountMax=3 \
+      -L "$lport:localhost:$rport" "$host"
+
+    # With -f, autossh retries forever even if the first connection fails,
+    # so wait for the tunnel to actually come up before reporting success.
+    for _ in $(seq 50); do
+      if alive "$pidf" && child_listening "$(cat "$pidf")" "$lport"; then
+        echo "forwarding localhost:$lport -> $host:$rport"
+        exit 0
+      fi
+      sleep 0.2
+    done
+
+    echo "failed to forward localhost:$lport -> $host:$rport" >&2
+    tail -n 5 "$logf" >&2 || true
+    alive "$pidf" && kill "$(cat "$pidf")"
+    rm -f "$pidf"
+    exit 1
+    ;;
+
+  stop)
+    # Require an explicit --all to stop everything, and don't allow mixing it with a filter.
+    if [[ -n $all ]]; then [[ -z $host && -z $port ]] || usage
+    else [[ -n $host || -n $port ]] || usage; fi
+    shopt -s nullglob
+    found=""
+    for f in "$DIR"/${host:-*}:${lport:-*}.pid; do
+      found=1
+      name=$(basename "$f" .pid)
+      if alive "$f"; then
+        kill "$(cat "$f")" || true
+        echo "stopped $name"
+      fi
+      rm -f "$f"
+    done
+    [[ -n $found ]] || echo "no matching forwards"
+    ;;
+
+  ls)
+    shopt -s nullglob
+    for f in "$DIR"/*.pid; do
+      name=$(basename "$f" .pid)
+      if alive "$f"; then
+        echo "$name  ($(forward_spec "$f"))"
+      else
+        rm -f "$f"
+      fi
+    done
+    ;;
+
+  *) usage ;;
+esac

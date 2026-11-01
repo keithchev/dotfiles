@@ -30,7 +30,10 @@ fi
 # Session start date and wall-clock duration
 if [ -n "$duration_ms" ]; then
   s=$(( ${duration_ms%.*} / 1000 ))
-  start_date=$(date -r $(( $(date +%s) - s )) +%Y-%m-%d)
+  # `date -r <epoch>` is BSD/macOS syntax; on GNU/Linux (the Docker container)
+  # -r means "read file mtime", so fall back to GNU's `-d @<epoch>`.
+  epoch=$(( $(date +%s) - s ))
+  start_date=$(date -r "$epoch" +%Y-%m-%d 2>/dev/null || date -d "@$epoch" +%Y-%m-%d 2>/dev/null)
   out="$out$(printf ' \033[2m|\033[0m \033[34m%s\033[0m' "$start_date")"
   h=$(( s / 3600 )); m=$(( s % 3600 / 60 )); s=$(( s % 60 ))
   if [ "$h" -gt 0 ]; then dur="${h}h${m}m"; else dur="${m}m${s}s"; fi

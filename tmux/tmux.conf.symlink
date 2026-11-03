@@ -1,3 +1,12 @@
 set -g mouse on
 bind -n WheelUpPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if -Ft= '#{pane_in_mode}' 'send-keys -M' 'select-pane -t=; copy-mode -e; send-keys -M'"
 bind -n WheelDownPane select-pane -t= \; send-keys -M
+
+# session/window tree (prefix + s): show the cwd of each session/window/pane.
+# The format lives in @tree-format so the `tt` shell function can reuse it.
+# ($HOME is expanded at config load time and then replaced with ~ in paths)
+set -g @tree-format "#{?pane_format,#{pane_current_command}#{?pane_active,*,}  #[fg=colour244]#{s|^$HOME|~|:pane_current_path},#{?window_format,#{window_name}#{window_flags}  #[fg=colour244]#{s|^$HOME|~|:pane_current_path}#{?#{>:#{window_panes},1}, (#{window_panes} panes),},#{session_windows} windows#{?session_attached, (attached),}  #[fg=colour244]#{s|^$HOME|~|:pane_current_path}}}"
+bind s choose-tree -Zs -O name -F "#{E:@tree-format}"
+
+# format for `tmux ls` (used by the tmux wrapper in tmux/aliases.zsh)
+set -g @ls-format "#{p12:session_name} #{p11:#{session_windows} windows} #{?session_attached,(attached),          }  #{s|^$HOME|~|:pane_current_path}"

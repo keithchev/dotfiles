@@ -1,0 +1,322 @@
+#!/usr/bin/env -S uv run --script
+"""Find notes for a specific date from ~/notes/YYYY/YYYY-notes.md"""
+
+import argparse
+import sys
+import re
+from datetime import datetime, timedelta
+from pathlib import Path
+
+
+NOTES_DIR = Path.home() / "Dropbox" / "notes"
+
+DAY_ABBREVS = {
+    0: ["Mon"],
+    1: ["Tue", "Tues"],
+    2: ["Wed", "Weds"],
+    3: ["Thu", "Thur", "Thurs"],
+    4: ["Fri"],
+    5: ["Sat"],
+    6: ["Sun"],
+}
+
+ALL_DAY_ABBREVS = ["Mon", "Tue", "Tues", "Wed", "Weds", "Thu", "Thur", "Thurs", "Fri", "Sat", "Sun"]
+
+# Matches bare "Fri 1/6" or "### Fri 1/6 --------" (2017/2018 legacy formats)
+LEGACY_HEADER_RE = re.compile(
+    rf"^(?:###\s+)?({'|'.join(ALL_DAY_ABBREVS)})\s+\d+/\d+\s*-*\s*$"
+)
+
+# Matches "# Fri 1/6" with flexible whitespace (2019+ format)
+MODERN_HEADER_RE = re.compile(r"^#\s*[^#\s]")
+
+
+def notes_file_for_year(year: int) -> Path | None:
+    """Return the notes file path for a given year, or None if not found."""
+    for ext in ("md", "txt"):
+        path = NOTES_DIR / str(year) / f"{year}-notes.{ext}"
+        if path.exists():
+            return path
+    return None
+
+
+def is_legacy(year: int) -> bool:
+    return year <= 2018
+
+
+def entry_header_re(year: int) -> re.Pattern:
+    return LEGACY_HEADER_RE if is_legacy(year) else MODERN_HEADER_RE
+
+
+def all_years() -> list[int]:
+    """Return sorted list of all years that have notes files."""
+    if not NOTES_DIR.exists():
+        return []
+    years = []
+    for d in NOTES_DIR.iterdir():
+        if d.is_dir() and re.match(r"^\d{4}$", d.name):
+            if notes_file_for_year(int(d.name)):
+                years.append(int(d.name))
+    return sorted(years)
+
+
+def find_notes(date_str: str) -> str | None:
+    """Find notes for the given date (YYYY-MM-DD format)."""
+    try:
+        date = datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        print(f"Error: Invalid date format '{date_str}'. Use YYYY-MM-DD.", file=sys.stderr)
+        return None
+
+    year = date.year
+    notes_file = notes_file_for_year(year)
+
+    if notes_file is None:
+        print(f"Error: Notes file not found for {year}", file=sys.stderr)
+        return None
+
+    month_day = f"{date.month}/{date.day}"  # e.g., "1/10" (no leading zeros)
+    abbrevs = "|".join(DAY_ABBREVS[date.weekday()])
+
+    if is_legacy(year):
+        # Match "Fri 1/6" or "### Fri 1/6 --------"
+        header_pattern = re.compile(
+            rf"^(?:###\s+)?({abbrevs})\s+{re.escape(month_day)}\s*-*\s*$"
+        )
+    else:
+        # Match "# Fri 1/6" or "# Mon 2021-04-19"
+        iso_date = date.strftime("%Y-%m-%d")
+        header_pattern = re.compile(
+            rf"^#\s*({abbrevs})\s+(?:{re.escape(month_day)}|{re.escape(iso_date)})\s*$"
+        )
+
+    content = notes_file.read_text()
+    lines = content.split("\n")
+
+    # Find the header line
+    start_idx = None
+    for i, line in enumerate(lines):
+        if header_pattern.match(line):
+            start_idx = i
+            break
+
+    if start_idx is None:
+        print(f"Error: No notes found for {date_str} (pattern: {header_pattern.pattern})", file=sys.stderr)
+        return None
+
+    # Collect lines until the next entry header
+    separator = entry_header_re(year)
+    result_lines = [lines[start_idx]]
+    for line in lines[start_idx + 1:]:
+        if separator.match(line):
+            break
+        result_lines.append(line)
+
+    return "\n".join(result_lines).rstrip()
+
+
+def find_all_entries(year: int) -> list[str]:
+    """Return all top-level heading entries from a year's notes file."""
+    notes_file = notes_file_for_year(year)
+    if notes_file is None:
+        print(f"Error: Notes file not found for {year}", file=sys.stderr)
+        return []
+
+    content = notes_file.read_text()
+    lines = content.split("\n")
+    header_re = entry_header_re(year)
+
+    entries = []
+    current = []
+    for line in lines:
+        if header_re.match(line):
+            if current:
+                entries.append("\n".join(current).rstrip())
+            current = [line]
+        elif current:
+            current.append(line)
+    if current:
+        entries.append("\n".join(current).rstrip())
+
+    return entries
+
+
+def highlight(text: str, keyword: str) -> str:
+    """Highlight all occurrences of keyword in text (case-insensitive) using ANSI bold bright red."""
+    pattern = re.compile(re.escape(keyword), re.IGNORECASE)
+    return pattern.sub(lambda m: f"\033[1;91m{m.group()}\033[0m", text)
+
+
+def search_notes(start_date_str: str, num_days: int, keyword: str) -> None:
+    """Search notes in a date range for a keyword, printing matching entries with highlights."""
+    try:
+        start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
+    except ValueError:
+        print(f"Error: Invalid date format '{start_date_str}'. Use YYYY-MM-DD.", file=sys.stderr)
+        sys.exit(1)
+
+    matches = []
+    for i in range(num_days):
+        day = start_date + timedelta(days=i)
+        result = find_notes(day.strftime("%Y-%m-%d"))
+        if result is not None and re.search(re.escape(keyword), result, re.IGNORECASE):
+            matches.append(highlight(result, keyword))
+
+    if not matches:
+        print(f"No notes containing '{keyword}' found in range.", file=sys.stderr)
+        sys.exit(1)
+    print("\n\n".join(matches))
+
+
+def extract_dates_from_entries(year: int, entries: list[str]) -> set[str]:
+    """Extract M/D strings from entry headers for a given year."""
+    # Match "M/D" or "YYYY-MM-DD" after a day abbreviation
+    abbrevs = "|".join(ALL_DAY_ABBREVS)
+    date_re = re.compile(rf"({abbrevs})\s+(?:(\d+/\d+)|(\d{{4}}-\d{{2}}-\d{{2}}))")
+    dates = set()
+    for entry in entries:
+        first_line = entry.split("\n")[0]
+        m = date_re.search(first_line)
+        if m:
+            if m.group(2):
+                # M/D format -> normalize
+                dates.add(m.group(2))
+            elif m.group(3):
+                # YYYY-MM-DD format -> convert to M/D
+                d = datetime.strptime(m.group(3), "%Y-%m-%d")
+                dates.add(f"{d.month}/{d.day}")
+    return dates
+
+
+def sanity_check() -> None:
+    """Print missing dates for each year's notes file."""
+    years = all_years()
+    if not years:
+        print("Error: No notes found.", file=sys.stderr)
+        sys.exit(1)
+
+    today = datetime.now().date()
+
+    for year in years:
+        entries = find_all_entries(year)
+        found_dates = extract_dates_from_entries(year, entries)
+
+        start = datetime(year, 1, 1).date()
+        end = min(datetime(year, 12, 31).date(), today)
+
+        missing = []
+        day = start
+        while day <= end:
+            month_day = f"{day.month}/{day.day}"
+            if month_day not in found_dates:
+                missing.append(day.strftime("%Y-%m-%d") + f" ({day.strftime('%a')})")
+            day += timedelta(days=1)
+
+        if missing:
+            print(f"{year}: {len(missing)} missing")
+            for m in missing:
+                print(f"  {m}")
+        else:
+            print(f"{year}: complete")
+        print()
+
+
+def search_all_years(keyword: str, count_only: bool) -> None:
+    """Search all years for a keyword, printing matches grouped by year."""
+    years = all_years()
+    if not years:
+        print("Error: No notes found.", file=sys.stderr)
+        sys.exit(1)
+
+    kw_pattern = re.compile(re.escape(keyword), re.IGNORECASE)
+    found_any = False
+
+    for year in years:
+        entries = find_all_entries(year)
+        matches = [e for e in entries if kw_pattern.search(e)]
+        if not matches:
+            continue
+        found_any = True
+        if count_only:
+            print(f"{year}: {len(matches)}")
+        else:
+            print(f"{'=' * 40}")
+            print(f" {year}")
+            print(f"{'=' * 40}\n")
+            print("\n\n".join(highlight(m, keyword) for m in matches))
+            print()
+
+    if not found_any:
+        print(f"No notes containing '{keyword}' found.", file=sys.stderr)
+        sys.exit(1)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Find notes for a specific date or date range.")
+    parser.add_argument("date", nargs="?", help="Date (YYYY-MM-DD) or year (YYYY)")
+    parser.add_argument("-d", "--days", type=int, default=1, help="Number of days to search (default: 1)")
+    parser.add_argument("-k", "--keyword", help="Filter entries containing this keyword (highlighted in output)")
+    parser.add_argument("--count", action="store_true", help="Show match counts per year instead of full entries")
+    parser.add_argument("--sanity-check", action="store_true", help="List missing dates for each year")
+    args = parser.parse_args()
+
+    if args.sanity_check:
+        sanity_check()
+        return
+
+    # Global keyword search (no date provided)
+    if args.date is None:
+        if not args.keyword:
+            parser.error("date is required unless -k is provided")
+        search_all_years(args.keyword, args.count)
+        return
+
+    # Detect year-only input (e.g. "2019")
+    is_year = re.match(r"^\d{4}$", args.date)
+
+    if is_year:
+        year = int(args.date)
+        entries = find_all_entries(year)
+        if not entries:
+            sys.exit(1)
+        if args.keyword:
+            kw_pattern = re.compile(re.escape(args.keyword), re.IGNORECASE)
+            matches = [e for e in entries if kw_pattern.search(e)]
+            if not matches:
+                print(f"No notes containing '{args.keyword}' found in {year}.", file=sys.stderr)
+                sys.exit(1)
+            if args.count:
+                print(f"{year}: {len(matches)}")
+            else:
+                print("\n\n".join(highlight(m, args.keyword) for m in matches))
+        else:
+            print("\n\n".join(entries))
+    else:
+        try:
+            start_date = datetime.strptime(args.date, "%Y-%m-%d")
+        except ValueError:
+            print(f"Error: Invalid date format '{args.date}'. Use YYYY-MM-DD or YYYY.", file=sys.stderr)
+            sys.exit(1)
+
+        if args.keyword:
+            search_notes(args.date, args.days, args.keyword)
+        elif args.days == 1:
+            result = find_notes(args.date)
+            if result is None:
+                sys.exit(1)
+            print(result)
+        else:
+            results = []
+            for i in range(args.days):
+                day = start_date + timedelta(days=i)
+                result = find_notes(day.strftime("%Y-%m-%d"))
+                if result is not None:
+                    results.append(result)
+            if not results:
+                print("No notes found for the given date range.", file=sys.stderr)
+                sys.exit(1)
+            print("\n\n".join(results))
+
+
+if __name__ == "__main__":
+    main()

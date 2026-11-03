@@ -1,0 +1,29 @@
+#!/usr/bin/env -S uv run --script
+import shutil
+import sys
+from datetime import datetime
+from pathlib import Path
+
+DEST_DIR = Path.home() / "notes" / "artifacts"
+
+def main():
+    if len(sys.argv) != 2:
+        print(f"Usage: {sys.argv[0]} <file>", file=sys.stderr)
+        sys.exit(1)
+
+    src = Path(sys.argv[1]).resolve()
+    if not src.is_file():
+        print(f"Error: {src} is not a file", file=sys.stderr)
+        sys.exit(1)
+
+    timestamp = datetime.now().strftime("%Y-%m-%d")
+    mangled_path = str(src).replace("/", "--")
+    dest_name = f"{timestamp}{mangled_path}"
+    dest = DEST_DIR / dest_name
+
+    DEST_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    print(f"Copied to {dest}")
+
+if __name__ == "__main__":
+    main()

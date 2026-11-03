@@ -1,0 +1,77 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "markdown",
+#     "boto3",
+# ]
+# ///
+
+import argparse
+import sys
+from datetime import date
+from pathlib import Path
+
+import boto3
+import markdown
+
+S3_BUCKET = "insitro-scratch"
+S3_PREFIX = "keith/docs/"
+
+
+HTML_TEMPLATE = """\
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{title}</title>
+<style>
+body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #333; }}
+h1, h2, h3 {{ margin-top: 1.5em; }}
+code {{ background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }}
+pre {{ background: #f4f4f4; padding: 16px; border-radius: 6px; overflow-x: auto; }}
+pre code {{ background: none; padding: 0; }}
+</style>
+</head>
+<body>
+{body}
+</body>
+</html>
+"""
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Publish a markdown file to S3 as rendered HTML.")
+    parser.add_argument("file", type=Path, help="Path to the markdown file")
+    parser.add_argument("--title", required=True, help="Title for the HTML page")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite if the S3 key already exists")
+    args = parser.parse_args()
+
+    if not args.file.is_file():
+        print(f"Error: {args.file} is not a file", file=sys.stderr)
+        sys.exit(1)
+
+    today = date.today().strftime("%Y-%m-%d")
+    slug = f"{today}-{args.title}"
+    s3_key = f"{S3_PREFIX}{slug}.html"
+
+    s3 = boto3.client("s3")
+
+    if not args.overwrite:
+        try:
+            s3.head_object(Bucket=S3_BUCKET, Key=s3_key)
+            print(f"Error: s3://{S3_BUCKET}/{s3_key} already exists. Use --overwrite to replace.", file=sys.stderr)
+            sys.exit(1)
+        except s3.exceptions.ClientError:
+            pass
+
+    md_content = args.file.read_text()
+    html_body = markdown.markdown(md_content, extensions=["fenced_code", "tables"])
+    html = HTML_TEMPLATE.format(title=f"{today} {args.title}", body=html_body)
+
+    s3.put_object(Bucket=S3_BUCKET, Key=s3_key, Body=html.encode(), ContentType="text/html")
+    print(f"Published to s3://{S3_BUCKET}/{s3_key}")
+
+
+if __name__ == "__main__":
+    main()

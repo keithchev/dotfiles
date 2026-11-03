@@ -1,0 +1,3 @@
+#!/bin/sh
+# the editor to use for git (via `core.editor = git-editor` in .gitconfig)
+subl -n -w $1 || vim $1

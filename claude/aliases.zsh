@@ -188,7 +188,8 @@ alias cdock-project='claude-docker-project'
 alias cdock-rebuild='claude-docker-rebuild'
 
 # Pretty-print a table of local Claude Code sessions.
-# Passes through flags like -a (all), -k <dir>, -n <limit>, --sort.
+# Passes through flags like -a (all), -c/--cwd (current dir only), -k <dir>,
+# -n <limit>, --sort.
 function ls-claude() {
     uv run $DOTFILES/claude/session_table.py "$@"
 }

@@ -16,7 +16,7 @@ This script merges both sources and prints one row per session. No third-party
 dependencies — just the standard library.
 
 Usage:
-    python3 session_table.py [--dir PATH] [--all] [--limit N] [--sort {modified,name,dir}]
+    python3 session_table.py [--dir PATH] [--cwd] [--all] [--limit N] [--sort {modified,name,dir}]
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -179,6 +180,22 @@ def collect_sessions(project_filter: str | None = None) -> list[Session]:
     return sessions
 
 
+def _encode_project_dir(cwd: str) -> str:
+    """Claude's project folder name for ``cwd``: every non-alphanumeric
+    character becomes ``-`` (``/Users/kc/my.app`` -> ``-Users-kc-my-app``)."""
+    return re.sub(r"[^A-Za-z0-9]", "-", cwd)
+
+
+def _in_dir(s: "Session", target: str) -> bool:
+    """True if the session was started in exactly ``target`` (a realpath).
+
+    Uses the recorded cwd when present; otherwise falls back to comparing the
+    session's project folder name against ``target``'s encoded form."""
+    if s.cwd:
+        return os.path.realpath(s.cwd) == target
+    return s.path.parent.name == _encode_project_dir(target)
+
+
 def _fmt_age(mtime: float) -> str:
     now = datetime.now(timezone.utc)
     dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
@@ -307,6 +324,14 @@ def main() -> None:
         "(e.g. -k notes).",
     )
     parser.add_argument(
+        "-c",
+        "--cwd",
+        action="store_true",
+        help="Only show sessions started in the current working directory "
+        "(exact match, not subdirectories). Combine with -a to include "
+        "non-renamed sessions.",
+    )
+    parser.add_argument(
         "-a",
         "--all",
         action="store_true",
@@ -337,6 +362,10 @@ def main() -> None:
 
     sessions = collect_sessions(project_filter=args.dir)
 
+    if args.cwd:
+        here = os.path.realpath(os.getcwd())
+        sessions = [s for s in sessions if _in_dir(s, here)]
+
     # By default show only user-renamed sessions; -a lists everything.
     if not args.all:
         sessions = [s for s in sessions if s.custom_title or s.user_name]
@@ -349,8 +378,11 @@ def main() -> None:
         sessions.sort(key=lambda s: (s.cwd or "", -s.mtime))
 
     if not sessions:
+        where = f" in {_home_rel(os.getcwd())}" if args.cwd else ""
         if not args.all:
-            print("No user-renamed sessions found. Use -a to list all sessions.")
+            print(f"No user-renamed sessions found{where}. Use -a to list all sessions.")
+        elif args.cwd:
+            print(f"No Claude Code sessions found{where}.")
         else:
             print("No Claude Code sessions found under", PROJECTS_DIR)
         return

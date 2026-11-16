@@ -58,3 +58,9 @@ alias ec2-ls-aliases='uv run $DOTFILES/aws/manage_instances.py list'
 function ec2-add-alias () {
     uv run $DOTFILES/aws/manage_instances.py add-alias "$@"
 }
+
+# launch a new instance with the same config as an existing one:
+#   ec2-clone <source-alias-or-id> <new-name> [--instance-type ...] [--dry-run]
+function ec2-clone () {
+    uv run $DOTFILES/aws/manage_instances.py clone "$@"
+}

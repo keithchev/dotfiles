@@ -19,6 +19,7 @@ It was largely written by Claude.
 The shh config parser in particular is unreviewed but appears to work.
 """
 
+import base64
 import click
 import pathlib
 import shutil
@@ -609,6 +610,274 @@ def _print_status_for_region(ec2, instance_ids, alias_by_id, region):
                 click.echo("  System Status: N/A")
 
             click.echo("")
+
+
+def _save_alias(alias: str, instance_id: str, region: Optional[str]) -> None:
+    """Write alias -> {id, region} into ~/.aws-instances.yaml, keeping key order."""
+    config = {}
+    if CONFIG_PATH.exists():
+        with CONFIG_PATH.open("r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+    config.setdefault("instances", {})
+    if region:
+        config["instances"][alias] = {"id": instance_id, "region": region}
+    else:
+        config["instances"][alias] = instance_id
+    with CONFIG_PATH.open("w", encoding="utf-8") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+
+def _get_ssh_host_body(host_alias: str, ssh_config_path: pathlib.Path) -> Optional[list]:
+    """Return the option lines under `Host <host_alias>` (excluding HostName), or None."""
+    if not ssh_config_path.exists():
+        return None
+    body, in_target, found = [], False, False
+    for line in ssh_config_path.read_text(encoding="utf-8").splitlines():
+        if _is_host_line(line):
+            if in_target:
+                break
+            in_target = _host_matches(line, host_alias)
+            found = found or in_target
+            continue
+        if in_target and line.strip():
+            if line.strip().split(None, 1)[0].lower() != "hostname":
+                body.append(line)
+    return body if found else None
+
+
+def clone_ssh_host_section(
+    src_alias: str, new_alias: str, new_ip: str,
+    ssh_config_path: Optional[pathlib.Path] = None,
+) -> None:
+    """
+    Add a `Host <new_alias>` section to ~/.ssh/config that copies the source
+    host's options (User, IdentityFile, ...) with the new IP. If the new host
+    already exists, just update its HostName.
+    """
+    if ssh_config_path is None:
+        ssh_config_path = pathlib.Path.home() / ".ssh" / "config"
+
+    if _get_ssh_host_body(new_alias, ssh_config_path) is not None:
+        update_ssh_config_host(new_alias, new_ip, ssh_config_path)
+        return
+
+    src_body = _get_ssh_host_body(src_alias, ssh_config_path) or []
+    if not src_body:
+        print(f"No SSH Host section for '{src_alias}' to copy; adding HostName only.")
+
+    original = ssh_config_path.read_text(encoding="utf-8") if ssh_config_path.exists() else ""
+    if ssh_config_path.exists():
+        backup_path = ssh_config_path.with_suffix(
+            ssh_config_path.suffix
+            + f".bak-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        )
+        shutil.copy2(ssh_config_path, backup_path)
+        print(f"Backed up SSH config to {backup_path}")
+
+    indent = "  "
+    if src_body:
+        first = src_body[0]
+        indent = first[: len(first) - len(first.lstrip())] or indent
+    section = [f"Host {new_alias}", f"{indent}HostName {new_ip}", *src_body]
+
+    text = original.rstrip("\n")
+    text = (text + "\n\n" if text else "") + "\n".join(section) + "\n"
+    ssh_config_path.parent.mkdir(parents=True, exist_ok=True)
+    ssh_config_path.write_text(text, encoding="utf-8")
+    print(f"Added Host '{new_alias}' to {ssh_config_path} (copied from '{src_alias}').")
+
+
+def build_clone_params(
+    ec2, src: dict, name: str,
+    image_id: Optional[str], instance_type: Optional[str],
+    volume_size: Optional[int] = None,
+) -> dict:
+    """
+    Build RunInstances params that reproduce the source instance's launch
+    config: AMI, type, key pair, subnet, security groups, IAM profile, tags,
+    user data, metadata options and root volume size/type.
+
+    Note: the new instance boots from the source's *base AMI*, not a copy of
+    the source's current disk. Only the root volume is recreated (fresh, from
+    the AMI's snapshot); extra data volumes are not copied.
+    """
+    image_id = image_id or src["ImageId"]
+    images = ec2.describe_images(ImageIds=[image_id]).get("Images", [])
+    if not images:
+        raise click.ClickException(
+            f"Base AMI {image_id} no longer exists or isn't visible. "
+            f"Pass --image-id to use a different one."
+        )
+    image = images[0]
+    root_device = image.get("RootDeviceName", src.get("RootDeviceName"))
+
+    # Root volume: match the source's current size/type/perf (size must be >=
+    # the AMI snapshot, which holds since the source was launched from it --
+    # unless a different --image-id is passed, in which case keep AMI defaults).
+    block_devices = []
+    src_root = next(
+        (b for b in src.get("BlockDeviceMappings", [])
+         if b["DeviceName"] == src.get("RootDeviceName") and "Ebs" in b),
+        None,
+    )
+    if src_root and image_id == src["ImageId"]:
+        vol = ec2.describe_volumes(VolumeIds=[src_root["Ebs"]["VolumeId"]])["Volumes"][0]
+        ebs = {
+            "VolumeSize": vol["Size"],
+            "VolumeType": vol["VolumeType"],
+            "DeleteOnTermination": True,
+        }
+        if vol["VolumeType"] in ("gp3", "io1", "io2") and vol.get("Iops"):
+            ebs["Iops"] = vol["Iops"]
+        if vol["VolumeType"] == "gp3" and vol.get("Throughput"):
+            ebs["Throughput"] = vol["Throughput"]
+        if vol.get("Encrypted"):
+            ebs["Encrypted"] = True
+            if vol.get("KmsKeyId"):
+                ebs["KmsKeyId"] = vol["KmsKeyId"]
+        block_devices.append({"DeviceName": root_device, "Ebs": ebs})
+
+    if volume_size:
+        # The root volume can't be smaller than the AMI's root snapshot.
+        snap_size = next(
+            (b["Ebs"].get("VolumeSize") for b in image.get("BlockDeviceMappings", [])
+             if b.get("DeviceName") == root_device and "Ebs" in b),
+            None,
+        )
+        if snap_size and volume_size < snap_size:
+            raise click.ClickException(
+                f"--volume-size {volume_size} is smaller than the AMI's "
+                f"root snapshot ({snap_size} GiB)."
+            )
+        if block_devices:
+            block_devices[0]["Ebs"]["VolumeSize"] = volume_size
+        else:
+            block_devices.append({
+                "DeviceName": root_device,
+                "Ebs": {"VolumeSize": volume_size, "DeleteOnTermination": True},
+            })
+
+    extra = [
+        b["DeviceName"] for b in src.get("BlockDeviceMappings", [])
+        if b["DeviceName"] != src.get("RootDeviceName")
+    ]
+    if extra:
+        print(f"Warning: not copying non-root volumes {extra}; the clone gets only a root volume.")
+
+    # Carry over user tags (AWS-reserved aws:* tags can't be set), new Name.
+    tags = [
+        t for t in src.get("Tags", [])
+        if t["Key"] != "Name" and not t["Key"].startswith("aws:")
+    ]
+    tags.append({"Key": "Name", "Value": name})
+
+    params = {
+        "ImageId": image_id,
+        "InstanceType": instance_type or src["InstanceType"],
+        "MinCount": 1,
+        "MaxCount": 1,
+        "SubnetId": src["SubnetId"],
+        "SecurityGroupIds": [g["GroupId"] for g in src.get("SecurityGroups", [])],
+        "TagSpecifications": [
+            {"ResourceType": "instance", "Tags": tags},
+            {"ResourceType": "volume", "Tags": list(tags)},
+        ],
+    }
+    if block_devices:
+        params["BlockDeviceMappings"] = block_devices
+    if src.get("KeyName"):
+        params["KeyName"] = src["KeyName"]
+    if src.get("IamInstanceProfile", {}).get("Arn"):
+        params["IamInstanceProfile"] = {"Arn": src["IamInstanceProfile"]["Arn"]}
+    if src.get("EbsOptimized"):
+        params["EbsOptimized"] = True
+    if src.get("MetadataOptions"):
+        mo = src["MetadataOptions"]
+        params["MetadataOptions"] = {
+            k: mo[k]
+            for k in ("HttpTokens", "HttpPutResponseHopLimit", "HttpEndpoint", "InstanceMetadataTags")
+            if k in mo
+        }
+
+    # User data comes back base64-encoded; boto3 re-encodes on RunInstances.
+    ud = ec2.describe_instance_attribute(
+        InstanceId=src["InstanceId"], Attribute="userData"
+    ).get("UserData", {}).get("Value")
+    if ud:
+        params["UserData"] = base64.b64decode(ud).decode("utf-8", errors="replace")
+
+    # T-family burst setting (standard/unlimited).
+    if params["InstanceType"].split(".")[0].startswith("t"):
+        try:
+            credit = ec2.describe_instance_credit_specifications(
+                InstanceIds=[src["InstanceId"]]
+            )["InstanceCreditSpecifications"][0]["CpuCredits"]
+            params["CreditSpecification"] = {"CpuCredits": credit}
+        except (ClientError, IndexError, KeyError):
+            pass
+
+    return params
+
+
+@cli.command()
+@click.argument("source")
+@click.argument("name")
+@click.option("--instance-type", help="Override the source's instance type")
+@click.option("--image-id", help="Override the base AMI (default: the AMI the source was launched from)")
+@click.option("--volume-size", type=click.IntRange(min=1), help="Root EBS volume size in GiB (default: same as source)")
+@click.option("--profile", help="AWS profile name")
+@click.option("--region", help="AWS region (overrides the alias's configured region)")
+@click.option("--dry-run", is_flag=True, help="Print the launch parameters and exit")
+@click.option("--timeout", default=300, help="Timeout in seconds")
+def clone(source, name, instance_type, image_id, volume_size, profile, region, dry_run, timeout):
+    """
+    Launch a new instance NAME with the same launch config as SOURCE.
+
+    Copies the base AMI, instance type, key pair, subnet, security groups,
+    IAM instance profile, tags, user data and root volume size/type. The new
+    instance gets its own fresh root volume built from the base AMI -- it does
+    NOT copy SOURCE's current disk contents. Registers NAME as an alias and
+    adds an SSH Host entry copied from SOURCE's.
+    """
+    instance_id, region = resolve_instance_and_region(source, region)
+
+    try:
+        existing = load_instances_config()
+    except (FileNotFoundError, ValueError):
+        existing = {}
+    if name in existing and not dry_run:
+        raise click.ClickException(f"Alias '{name}' already exists in {CONFIG_PATH}.")
+
+    session_kwargs = {"profile_name": profile} if profile else {}
+    session = boto3.Session(**session_kwargs)
+    ec2 = session.client("ec2", region_name=region)
+    region = region or ec2.meta.region_name
+
+    src = ec2.describe_instances(InstanceIds=[instance_id])["Reservations"][0]["Instances"][0]
+    params = build_clone_params(ec2, src, name, image_id, instance_type, volume_size)
+
+    click.echo(f"Cloning {instance_id} -> '{name}' in {region}:")
+    shown = {k: v for k, v in params.items() if k != "UserData"}
+    click.echo(yaml.dump(shown, default_flow_style=False, sort_keys=False))
+    if "UserData" in params:
+        click.echo(f"UserData: ({len(params['UserData'])} chars, copied from source)")
+    if dry_run:
+        try:
+            ec2.run_instances(**params, DryRun=True)
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "DryRunOperation":
+                raise click.ClickException(f"AWS rejected the launch: {e}")
+        click.echo("AWS dry-run check passed (nothing launched).")
+        return
+
+    new_id = ec2.run_instances(**params)["Instances"][0]["InstanceId"]
+    click.echo(f"Launched {new_id}")
+    _save_alias(name, new_id, region)
+    click.echo(f"Added alias: {name} -> {new_id} ({region})")
+
+    state, ip = start_instance_and_get_ip(new_id, profile, region, timeout)
+    click.echo(f"Instance state: {state}")
+    clone_ssh_host_section(source, name, ip)
 
 
 @cli.command()

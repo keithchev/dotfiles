@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Set up a fresh Ubuntu 24.04 (arm64) EC2 instance like our dev box:
-# apt packages, dotfiles (minor-tweaks branch), oh-my-zsh, linuxbrew (eza, gh),
+# apt packages, swap + earlyoom, dotfiles (minor-tweaks branch), oh-my-zsh, linuxbrew (eza, gh),
 # nvm + node 26 + pnpm, uv + awscli, Claude Code, and tailscale (not logged in).
 # Safe to re-run.
 #
@@ -28,6 +28,28 @@ sudo apt-get install -y -qq \
   libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libgbm1 \
   libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libpango-1.0-0 \
   libcairo2 libasound2t64 libatspi2.0-0t64 >/dev/null
+
+step "swap + earlyoom"
+# Without swap, memory pressure makes the box thrash (sshd stops answering)
+# instead of OOM-killing anything. Swap buys headroom, and earlyoom kills the
+# largest process well before the kernel gets stuck.
+SWAP_SIZE="${SWAP_SIZE:-4G}"
+if ! sudo swapon --show=NAME --noheadings | grep -qx /swapfile; then
+  [ -f /swapfile ] || { sudo fallocate -l "$SWAP_SIZE" /swapfile && sudo chmod 600 /swapfile && sudo mkswap -q /swapfile; }
+  sudo swapon /swapfile
+fi
+grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+# Prefer dropping page cache over swapping out the apps in use.
+echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-swappiness.conf >/dev/null
+sudo sysctl -q -p /etc/sysctl.d/99-swappiness.conf
+sudo apt-get install -y -qq earlyoom >/dev/null
+# Kill when available memory < 5% and swap free < 10%; never kill the
+# processes that keep the box reachable.
+sudo tee /etc/default/earlyoom >/dev/null <<'EOF'
+EARLYOOM_ARGS="-m 5 -s 10 -r 3600 --avoid '^(sshd|mosh-server|tailscaled|systemd|systemd-journal)$' --prefer '^(python3?|uvicorn)$'"
+EOF
+sudo systemctl enable -q earlyoom
+sudo systemctl restart earlyoom
 
 step "tailscale (installed, not logged in)"
 command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sh

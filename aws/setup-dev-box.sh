@@ -8,6 +8,11 @@
 #   ssh <host> "GIT_NAME='$(git config user.name)' GIT_EMAIL='$(git config user.email)' bash -s" \
 #     < $DOTFILES/aws/setup-dev-box.sh
 #
+# GitHub over ssh (needed under mosh, which doesn't forward the ssh agent):
+# copy a GitHub key to the box first and this script adds the ssh config for it.
+#   ssh 2026-dev-box 'cat ~/.ssh/keith-ed25519' | ssh <host> 'umask 077; cat > ~/.ssh/keith-ed25519'
+# (Remember to delete it from the box if the box is handed off or terminated.)
+#
 # Afterwards, on the box: `sudo tailscale up`, `claude` (login), `gh auth login`.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -26,6 +31,18 @@ sudo apt-get install -y -qq \
 
 step "tailscale (installed, not logged in)"
 command -v tailscale >/dev/null || curl -fsSL https://tailscale.com/install.sh | sh
+
+step "github ssh"
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+if [ -f ~/.ssh/keith-ed25519 ]; then
+  chmod 600 ~/.ssh/keith-ed25519
+  grep -q '^Host github.com' ~/.ssh/config 2>/dev/null || \
+    printf 'Host github.com\n    IdentityFile ~/.ssh/keith-ed25519\n    IdentitiesOnly yes\n' >> ~/.ssh/config
+  chmod 600 ~/.ssh/config
+else
+  echo "no ~/.ssh/keith-ed25519; skipping (see header to copy it)"
+fi
+ssh-keygen -F github.com >/dev/null || ssh-keyscan -t ed25519 github.com 2>/dev/null >> ~/.ssh/known_hosts
 
 step "dotfiles"
 mkdir -p ~/projects

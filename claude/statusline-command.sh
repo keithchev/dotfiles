@@ -1,16 +1,20 @@
 #!/bin/bash
 # Status line modeled on the oh-my-zsh "ys" theme:
-# # DIR on git:BRANCH STATE | DURATION | $COST | CTX% [TIME]
+# # USER @ HOST in DIR on git:BRANCH STATE | DURATION | $COST | CTX% [TIME]
 input=$(cat)
 cwd=$(echo "$input" | jq -r '.workspace.current_dir // .cwd')
 duration_ms=$(echo "$input" | jq -r '.cost.total_duration_ms // empty')
 cost=$(echo "$input" | jq -r '.cost.total_cost_usd // empty')
 ctx_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
 
-dir="${cwd/#$HOME/~}"
+dir="$cwd"
+case "$cwd" in "$HOME"|"$HOME"/*) dir="~${cwd#"$HOME"}" ;; esac
 now=$(date +%H:%M:%S)
 
-out=$(printf '\033[1;34m#\033[0m \033[1;33m%s\033[0m' "$dir")
+user=$(id -un 2>/dev/null || echo "$USER")
+host=$(hostname -s 2>/dev/null || hostname)
+
+out=$(printf '\033[1;34m#\033[0m \033[36m%s\033[0m @ \033[32m%s\033[0m in \033[1;33m%s\033[0m' "$user" "$host" "$dir")
 
 branch=$(git -C "$cwd" --no-optional-locks symbolic-ref --short HEAD 2>/dev/null \
   || git -C "$cwd" --no-optional-locks rev-parse --short HEAD 2>/dev/null)

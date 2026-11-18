@@ -5,8 +5,11 @@
 # Safe to re-run.
 #
 # Usage, from a machine with ssh access to the new box (e.g. after ec2-clone):
-#   ssh <host> "GIT_NAME='$(git config user.name)' GIT_EMAIL='$(git config user.email)' bash -s" \
+#   ssh <host> "GIT_NAME='$(git config user.name)' GIT_EMAIL='$(git config user.email)' bash -s -- --hostname <name>" \
 #     < $DOTFILES/aws/setup-dev-box.sh
+#
+# Options:
+#   --hostname NAME   set the box's hostname (persisted across reboots); omit to leave it as is
 #
 # GitHub over ssh (needed under mosh, which doesn't forward the ssh agent):
 # copy a GitHub key to the box first and this script adds the ssh config for it.
@@ -17,6 +20,34 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 step() { echo; echo "=== $* ==="; }
+usage() { echo "usage: setup-dev-box.sh [--hostname NAME]  (env: GIT_NAME, GIT_EMAIL, SWAP_SIZE)"; }
+
+NEW_HOSTNAME=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --hostname) [ $# -ge 2 ] || { echo "--hostname needs a value" >&2; exit 2; }; NEW_HOSTNAME="$2"; shift 2 ;;
+    --hostname=*) NEW_HOSTNAME="${1#*=}"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+if [ -n "$NEW_HOSTNAME" ] && ! [[ "$NEW_HOSTNAME" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+  echo "invalid hostname '$NEW_HOSTNAME': use lowercase letters, digits and hyphens (max 63)" >&2
+  exit 2
+fi
+
+if [ -n "$NEW_HOSTNAME" ]; then
+  step "hostname: $NEW_HOSTNAME"
+  # /etc/hosts first, so sudo can resolve the new name as soon as it's set.
+  if grep -q '^127\.0\.1\.1[[:space:]]' /etc/hosts; then
+    sudo sed -i "s/^127\.0\.1\.1[[:space:]].*/127.0.1.1 $NEW_HOSTNAME/" /etc/hosts
+  else
+    echo "127.0.1.1 $NEW_HOSTNAME" | sudo tee -a /etc/hosts >/dev/null
+  fi
+  sudo hostnamectl set-hostname "$NEW_HOSTNAME"
+  # Otherwise cloud-init resets it to ip-x-x-x-x on the next boot.
+  echo "preserve_hostname: true" | sudo tee /etc/cloud/cloud.cfg.d/99-preserve-hostname.cfg >/dev/null
+fi
 
 step "apt packages"
 sudo apt-get update -qq

@@ -1,0 +1,307 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "markdown-it-py[linkify,plugins]",
+#     "pygments",
+#     "rich",
+# ]
+# ///
+"""Quickly preview rendered markdown files.
+
+Renders markdown to a self-contained HTML page and opens it in the browser
+(or renders it in the terminal with --term). With no file argument, finds the
+most recently modified markdown file in Claude Code's temp dirs, which is
+where ad hoc notes/plans/PR bodies tend to end up.
+
+Examples:
+    mdview notes.md            # render and open in browser
+    mdview                     # open the most recent claude temp .md file
+    mdview -l                  # list recent claude temp .md files
+    mdview -r 3                # open the 3rd most recent one
+    mdview -t notes.md         # render in the terminal instead
+    mdview -d ~/scratch        # search a different dir for recent files
+"""
+
+import argparse
+import hashlib
+import html
+import os
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from markdown_it import MarkdownIt
+from mdit_py_plugins.footnote import footnote_plugin
+from mdit_py_plugins.front_matter import front_matter_plugin
+from mdit_py_plugins.tasklists import tasklists_plugin
+from pygments import highlight
+from pygments.formatters import HtmlFormatter
+from pygments.lexers import get_lexer_by_name
+from pygments.util import ClassNotFound
+
+OUT_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "mdview"
+
+# Directory names to skip when searching for recent markdown files.
+SKIP_DIRS = {"node_modules", ".git", ".venv", "venv", "bundled-skills", "site-packages", "__pycache__"}
+
+CSS = """
+:root { color-scheme: light dark; --fg:#1f2328; --bg:#ffffff; --muted:#59636e; --border:#d1d9e0;
+        --code-bg:#f6f8fa; --link:#0969da; --quote:#59636e; }
+@media (prefers-color-scheme: dark) {
+  :root { --fg:#e6edf3; --bg:#0d1117; --muted:#9198a1; --border:#3d444d;
+          --code-bg:#151b23; --link:#4493f8; --quote:#9198a1; }
+}
+html { background: var(--bg); }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+       font-size: 16px; line-height: 1.6; color: var(--fg); background: var(--bg);
+       max-width: 880px; margin: 0 auto; padding: 32px 24px 96px; }
+.meta { color: var(--muted); font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 24px; word-break: break-all; }
+a { color: var(--link); text-decoration: none; } a:hover { text-decoration: underline; }
+h1, h2, h3, h4, h5, h6 { margin: 1.5em 0 0.6em; line-height: 1.25; font-weight: 600; }
+h1 { font-size: 2em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+h3 { font-size: 1.25em; }
+p, ul, ol, blockquote, table, pre { margin: 0 0 16px; }
+ul, ol { padding-left: 2em; } li + li { margin-top: .25em; }
+li.task-list-item { list-style: none; } li.task-list-item input { margin: 0 .4em 0 -1.4em; }
+blockquote { padding: 0 1em; color: var(--quote); border-left: .25em solid var(--border); }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 85%;
+       background: var(--code-bg); padding: .2em .4em; border-radius: 6px; }
+pre { background: var(--code-bg); padding: 16px; border-radius: 6px; overflow-x: auto; line-height: 1.45; }
+pre code { background: none; padding: 0; font-size: 85%; }
+table { border-collapse: collapse; display: block; overflow-x: auto; }
+th, td { border: 1px solid var(--border); padding: 6px 13px; }
+th { font-weight: 600; } tr:nth-child(2n) td { background: var(--code-bg); }
+hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
+img { max-width: 100%; }
+.mermaid { background: transparent; text-align: center; }
+"""
+
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>{css}</style>
+<style>{pyg_light}</style>
+<style>@media (prefers-color-scheme: dark) {{ {pyg_dark} }}</style>
+</head>
+<body>
+<div class="meta">{meta}</div>
+{body}
+{mermaid}
+</body>
+</html>
+"""
+
+MERMAID_SCRIPT = """<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad: true,
+  theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default" });
+</script>"""
+
+
+def claude_tmp_dirs() -> list[Path]:
+    """Directories where Claude Code puts scratch files."""
+    uid = os.getuid()
+    candidates = [Path(f"/tmp/claude-{uid}"), Path(f"/private/tmp/claude-{uid}")]
+    if tmpdir := os.environ.get("TMPDIR"):
+        candidates.append(Path(tmpdir) / f"claude-{uid}")
+    seen, dirs = set(), []
+    for d in candidates:
+        if d.is_dir() and (r := d.resolve()) not in seen:
+            seen.add(r)
+            dirs.append(r)
+    return dirs
+
+
+def find_recent_md(roots: list[Path], limit: int) -> list[Path]:
+    found: list[tuple[float, Path]] = []
+    for root in roots:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            for name in filenames:
+                if name.lower().endswith((".md", ".markdown")):
+                    p = Path(dirpath) / name
+                    try:
+                        found.append((p.stat().st_mtime, p))
+                    except OSError:
+                        pass
+    found.sort(reverse=True)
+    return [p for _, p in found[:limit]]
+
+
+def humanize_age(mtime: float) -> str:
+    secs = int(time.time() - mtime)
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if secs >= size:
+            return f"{secs // size}{unit} ago"
+    return f"{secs}s ago"
+
+
+def short_path(p: Path) -> str:
+    s = str(p)
+    home = str(Path.home())
+    return "~" + s[len(home):] if s.startswith(home) else s
+
+
+def make_renderer() -> MarkdownIt:
+    def highlight_code(code: str, lang: str, _attrs: str) -> str:
+        if lang == "mermaid":
+            return f'<pre class="mermaid">{html.escape(code)}</pre>'
+        if not lang:
+            return ""  # fall back to default escaping
+        try:
+            lexer = get_lexer_by_name(lang)
+        except ClassNotFound:
+            return ""
+        return highlight(code, lexer, HtmlFormatter(nowrap=True))
+
+    md = MarkdownIt("gfm-like", {"html": True, "linkify": True, "typographer": False,
+                                 "highlight": highlight_code})
+    md.use(front_matter_plugin).use(footnote_plugin).use(tasklists_plugin)
+    return md
+
+
+def absolutize_urls(tokens, base_dir: Path) -> None:
+    """Point relative image/link URLs at the source dir, since the HTML lives elsewhere."""
+    def fix(url: str) -> str:
+        if not url or url.startswith("#") or re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", url) or url.startswith("/"):
+            return url
+        path, sep, frag = url.partition("#")
+        return (base_dir / path).as_uri() + sep + frag
+
+    for tok in tokens:
+        for child in [tok, *(tok.children or [])]:
+            for attr in ("src", "href"):
+                if (val := child.attrGet(attr)) is not None:
+                    child.attrSet(attr, fix(str(val)))
+
+
+def render_html(path: Path) -> str:
+    text = path.read_text(errors="replace")
+    md = make_renderer()
+    tokens = md.parse(text)
+    absolutize_urls(tokens, path.parent)
+    body = md.renderer.render(tokens, md.options, {})
+    # Only load mermaid (from CDN) when the doc actually has a mermaid block.
+    mermaid = MERMAID_SCRIPT if 'class="mermaid"' in body else ""
+    mtime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(path.stat().st_mtime))
+    return HTML_TEMPLATE.format(
+        title=html.escape(path.name),
+        css=CSS,
+        pyg_light=HtmlFormatter(style="default").get_style_defs("pre code, code"),
+        pyg_dark=HtmlFormatter(style="github-dark").get_style_defs("pre code, code"),
+        meta=f"{html.escape(str(path))} &middot; modified {mtime}",
+        body=body,
+        mermaid=mermaid,
+    )
+
+
+def write_html(path: Path) -> Path:
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    # Stable name per source file so re-running just refreshes the same page.
+    digest = hashlib.sha1(str(path).encode()).hexdigest()[:8]
+    out = OUT_DIR / f"{path.stem}-{digest}.html"
+    out.write_text(render_html(path))
+    return out
+
+
+def can_open_browser() -> bool:
+    if platform.system() == "Darwin":
+        return not os.environ.get("SSH_CONNECTION")
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) and bool(
+        shutil.which("xdg-open")
+    )
+
+
+def open_in_browser(html_path: Path) -> None:
+    opener = "open" if platform.system() == "Darwin" else "xdg-open"
+    subprocess.run([opener, str(html_path)], check=False)
+
+
+def render_terminal(paths: list[Path]) -> None:
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.rule import Rule
+
+    console = Console()
+    use_pager = console.is_terminal
+    if use_pager:
+        os.environ.setdefault("LESS", "-R")
+    ctx = console.pager(styles=True) if use_pager else _nullcontext()
+    with ctx:
+        for p in paths:
+            console.print(Rule(short_path(p), style="dim"))
+            text = re.sub(r"\A---\n.*?\n---\n", "", p.read_text(errors="replace"), flags=re.S)
+            console.print(Markdown(text, code_theme="monokai"))
+
+
+class _nullcontext:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Preview rendered markdown in the browser or terminal.",
+        epilog="With no files, opens the most recent .md file in Claude Code's temp dirs.",
+    )
+    parser.add_argument("files", nargs="*", type=Path, help="markdown files to view")
+    parser.add_argument("-t", "--term", action="store_true", help="render in the terminal instead of the browser")
+    parser.add_argument("-l", "--list", action="store_true", help="list recent markdown files and exit")
+    parser.add_argument("-r", "--recent", type=int, metavar="N", default=1,
+                        help="with no files, open the Nth most recent file (default: 1)")
+    parser.add_argument("-n", type=int, default=15, metavar="COUNT", help="number of files for --list (default: 15)")
+    parser.add_argument("-d", "--dir", type=Path, action="append",
+                        help="search this dir for recent files instead of claude temp dirs (repeatable)")
+    parser.add_argument("-p", "--print-path", action="store_true",
+                        help="write the HTML and print its path without opening it")
+    args = parser.parse_args()
+
+    files: list[Path] = [f.expanduser().resolve() for f in args.files]
+
+    if not files:
+        roots = [d.expanduser().resolve() for d in args.dir] if args.dir else claude_tmp_dirs()
+        if not roots:
+            sys.exit("mdview: no files given and no claude temp dirs found")
+        recent = find_recent_md(roots, max(args.n, args.recent))
+        if args.list:
+            if not recent:
+                print("no markdown files found in: " + ", ".join(map(short_path, roots)))
+            for i, p in enumerate(recent[: args.n], 1):
+                print(f"{i:>3}  {humanize_age(p.stat().st_mtime):>8}  {short_path(p)}")
+            return
+        if len(recent) < args.recent:
+            sys.exit("mdview: no markdown files found in: " + ", ".join(map(short_path, roots)))
+        files = [recent[args.recent - 1]]
+        print(f"mdview: {short_path(files[0])}", file=sys.stderr)
+
+    for f in files:
+        if not f.is_file():
+            sys.exit(f"mdview: not a file: {f}")
+
+    if args.term or (not args.print_path and not can_open_browser()):
+        render_terminal(files)
+        return
+
+    for f in files:
+        out = write_html(f)
+        if args.print_path:
+            print(out)
+        else:
+            open_in_browser(out)
+
+
+if __name__ == "__main__":
+    main()
